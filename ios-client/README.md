@@ -23,9 +23,76 @@ A native SwiftUI iOS client for Cursor Mobile Access. Control your Cursor IDE on
 
 ## Installation
 
+### Command Line Build (Recommended)
+
+Build and run entirely from the terminal using the included Makefile:
+
+```bash
+cd ios-client
+
+# Build for simulator
+make build
+
+# Build and run on simulator
+make run
+
+# Run on a specific simulator
+make run SIMULATOR="iPhone 15 Pro"
+
+# List available simulators
+make list-simulators
+
+# Clean and rebuild
+make clean && make build
+
+# See all available commands
+make help
+```
+
+### Using Build Scripts
+
+Alternatively, use the shell scripts in `scripts/`:
+
+```bash
+# Build for simulator (debug)
+./scripts/build.sh debug simulator
+
+# Build for simulator (release)
+./scripts/build.sh release simulator
+
+# Build and run on simulator
+./scripts/run.sh "iPhone 16"
+
+# Install on physical device (requires ios-deploy)
+./scripts/install-device.sh
+```
+
+### Raw xcodebuild Commands
+
+If you prefer direct xcodebuild commands:
+
+```bash
+# Build for simulator
+xcodebuild \
+  -project CursorMobile/CursorMobile.xcodeproj \
+  -scheme CursorMobile \
+  -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  build
+
+# Build for device
+xcodebuild \
+  -project CursorMobile/CursorMobile.xcodeproj \
+  -scheme CursorMobile \
+  -configuration Debug \
+  -destination 'generic/platform=iOS' \
+  -allowProvisioningUpdates \
+  build
+```
+
 ### From Xcode
 
-1. Open `CursorMobile.xcodeproj` in Xcode
+1. Open `CursorMobile/CursorMobile.xcodeproj` in Xcode
 2. Select your development team in Signing & Capabilities
 3. Select your iOS device or simulator
 4. Build and run (⌘R)
@@ -34,10 +101,37 @@ A native SwiftUI iOS client for Cursor Mobile Access. Control your Cursor IDE on
 
 *Coming soon*
 
+## Build System
+
+The project includes multiple ways to build from the command line:
+
+| Method | Command | Description |
+|--------|---------|-------------|
+| Make | `make build` | Build for simulator |
+| Make | `make run` | Build and run on simulator |
+| Make | `make build-device` | Build for physical device |
+| Script | `./scripts/build.sh` | Flexible build script |
+| Script | `./scripts/run.sh` | Build and run script |
+| xcodebuild | See above | Direct Xcode CLI |
+
+### Prerequisites for Command Line Build
+
+- **Xcode**: Full Xcode installation (not just Command Line Tools)
+- **Xcode Command Line Tools**: `xcode-select --install`
+- **For device deployment**: `brew install ios-deploy` (optional)
+- **For prettier output**: `brew install xcpretty` (optional)
+
 ## Project Structure
 
 ```
-CursorMobile/
+ios-client/
+├── Makefile                      # Command line build system
+├── scripts/
+│   ├── build.sh                 # Build script
+│   ├── run.sh                   # Run on simulator script
+│   └── install-device.sh        # Install on device script
+│
+└── CursorMobile/
 ├── CursorMobileApp.swift     # App entry point with deep link handling
 ├── ContentView.swift          # Root view controller
 ├── Info.plist                # App configuration & permissions

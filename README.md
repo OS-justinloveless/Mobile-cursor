@@ -313,6 +313,21 @@ For iPhone and iPad users, we provide a native SwiftUI app that offers the best 
 
 ### Building the iOS App
 
+**From command line (no Xcode GUI needed):**
+```bash
+cd ios-client
+
+# Build for simulator
+make build
+
+# Build and run on simulator
+make run
+
+# See all commands
+make help
+```
+
+**From Xcode:**
 1. Open `ios-client/CursorMobile/CursorMobile.xcodeproj` in Xcode
 2. Select your development team
 3. Build and run on your device
