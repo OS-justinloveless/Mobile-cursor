@@ -4,6 +4,7 @@ Control Cursor IDE on your laptop from your mobile phone. This app provides a lo
 
 ## Features
 
+- **QR Code Connection**: Scan a QR code to connect instantly - no manual typing!
 - **Project Management**: Browse, open, and create new Cursor projects
 - **File Browser**: Navigate your file system and view/edit files
 - **Code Viewer**: Syntax-highlighted code viewing with edit capabilities
@@ -54,25 +55,39 @@ cd ../server
 npm start
 ```
 
-You'll see output like:
+You'll see output with a QR code:
 ```
 ╔═══════════════════════════════════════════════════════════════╗
 ║           Cursor Mobile Access Server                          ║
 ╠═══════════════════════════════════════════════════════════════╣
-║ Server running on port 3847                                     ║
-║                                                                 ║
-║ Access from your phone:                                         ║
-║   http://<your-laptop-ip>:3847                                 ║
-║                                                                 ║
-║ Auth Token: abc12345...                                        ║
-║                                                                 ║
-║ Save your full token to connect:                                ║
-║ xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx                          ║
+║ Server running on port 3847                                    ║
+║                                                                ║
+║ Local URL: http://192.168.1.100:3847                          ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                                ║
+║  Scan this QR code with your phone to connect:                 ║
+║                                                                ║
+║      ▄▄▄▄▄▄▄  ▄    ▄ ▄▄▄▄▄▄▄                                  ║
+║      █ ▄▄▄ █ ▀█▄█▀▄  █ ▄▄▄ █                                  ║
+║      █ ███ █ ▀▀ ▄▀▄▄ █ ███ █                                  ║
+║      ▀▀▀▀▀▀▀ █ █▀▄▀█ ▀▀▀▀▀▀▀                                  ║
+║       ...                                                      ║
+║                                                                ║
+╠═══════════════════════════════════════════════════════════════╣
+║ Manual Connection:                                             ║
+║ Token: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx                    ║
 ╚═══════════════════════════════════════════════════════════════╝
 ```
 
 ### 4. Connect from Your Phone
 
+**Option A: Scan QR Code (Easiest)**
+1. Open your phone's browser and navigate to `http://<your-laptop-ip>:3847`
+2. Tap "Scan QR Code to Connect"
+3. Point your camera at the QR code in the terminal
+4. You're connected!
+
+**Option B: Manual Entry**
 1. Make sure your phone is on the same WiFi network as your laptop
 2. Open your phone's browser
 3. Navigate to `http://<your-laptop-ip>:3847`

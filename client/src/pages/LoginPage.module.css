@@ -140,3 +140,147 @@
   font-family: monospace;
   color: var(--accent);
 }
+
+/* QR Scanner styles */
+.scanButton {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, var(--accent) 0%, #0098ff 100%);
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 4px 12px rgba(0, 122, 204, 0.3);
+}
+
+.scanButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 122, 204, 0.4);
+}
+
+.scanButton:active {
+  transform: translateY(0);
+}
+
+.scanIcon {
+  font-size: 20px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 24px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.divider span {
+  padding: 0 16px;
+}
+
+/* Scanner modal */
+.scannerCard {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+
+.scannerHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.scannerHeader h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.closeButton {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-primary);
+  font-size: 18px;
+  transition: background 0.2s;
+}
+
+.closeButton:hover {
+  background: var(--bg-hover);
+}
+
+.scannerHint {
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
+.scannerWrapper {
+  width: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #000;
+}
+
+.scanner {
+  width: 100%;
+  min-height: 300px;
+}
+
+.scanner video {
+  width: 100% !important;
+  border-radius: var(--radius-md);
+}
+
+.scannerError {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(241, 76, 76, 0.1);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-md);
+  color: var(--error);
+  font-size: 14px;
+  text-align: center;
+}
+
+.manualButton {
+  width: 100%;
+  margin-top: 20px;
+  padding: 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  transition: background 0.2s;
+}
+
+.manualButton:hover {
+  background: var(--bg-hover);
+}

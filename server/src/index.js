@@ -5,7 +5,9 @@ import cors from 'cors';
 import { config } from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
+import QRCode from 'qrcode';
 
 import { setupRoutes } from './routes/index.js';
 import { setupWebSocket } from './websocket/index.js';
@@ -24,6 +26,29 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN || uuidv4();
 
 // Initialize auth manager
 const authManager = new AuthManager(AUTH_TOKEN);
+
+// Get local IP address
+function getLocalIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
+const LOCAL_IP = getLocalIP();
+
+// Generate connection URL for QR code
+function getConnectionData() {
+  return JSON.stringify({
+    url: `http://${LOCAL_IP}:${PORT}`,
+    token: AUTH_TOKEN
+  });
+}
 
 // Middleware
 app.use(cors());
@@ -45,25 +70,94 @@ setupRoutes(app);
 // Setup WebSocket
 setupWebSocket(wss, authManager);
 
+// QR Code endpoint (no auth required - used for initial connection)
+app.get('/qr', async (req, res) => {
+  try {
+    const connectionData = getConnectionData();
+    const qrDataUrl = await QRCode.toDataURL(connectionData, {
+      width: 300,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#ffffff'
+      }
+    });
+    res.json({ 
+      qr: qrDataUrl,
+      url: `http://${LOCAL_IP}:${PORT}`,
+      ip: LOCAL_IP,
+      port: PORT
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate QR code' });
+  }
+});
+
+// QR Code image endpoint
+app.get('/qr.png', async (req, res) => {
+  try {
+    const connectionData = getConnectionData();
+    const buffer = await QRCode.toBuffer(connectionData, {
+      width: 300,
+      margin: 2
+    });
+    res.type('png').send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate QR code' });
+  }
+});
+
 // Serve client app for all other routes
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../../client/dist/index.html'));
 });
 
-server.listen(PORT, '0.0.0.0', () => {
+// Display startup message with QR code
+async function displayStartupMessage() {
+  const connectionData = getConnectionData();
+  
+  console.log('\n');
   console.log('╔═══════════════════════════════════════════════════════════════╗');
   console.log('║           Cursor Mobile Access Server                          ║');
   console.log('╠═══════════════════════════════════════════════════════════════╣');
   console.log(`║ Server running on port ${PORT}                                   ║`);
   console.log('║                                                                 ║');
-  console.log('║ Access from your phone:                                         ║');
-  console.log(`║   http://<your-laptop-ip>:${PORT}                                 ║`);
+  console.log(`║ Local URL: http://${LOCAL_IP}:${PORT}`.padEnd(66) + '║');
+  console.log('╠═══════════════════════════════════════════════════════════════╣');
   console.log('║                                                                 ║');
-  console.log(`║ Auth Token: ${AUTH_TOKEN.substring(0, 8)}...                                      ║`);
+  console.log('║  Scan this QR code with your phone to connect:                  ║');
   console.log('║                                                                 ║');
-  console.log('║ Save your full token to connect:                                ║');
-  console.log(`║ ${AUTH_TOKEN}                          ║`);
+  
+  // Generate QR code for terminal
+  try {
+    const qrString = await QRCode.toString(connectionData, {
+      type: 'terminal',
+      small: true
+    });
+    
+    // Indent and display QR code
+    const lines = qrString.split('\n');
+    for (const line of lines) {
+      if (line.trim()) {
+        console.log('║  ' + line.padEnd(63) + '║');
+      }
+    }
+  } catch (e) {
+    console.log('║  (QR code generation failed - use manual connection)          ║');
+  }
+  
+  console.log('║                                                                 ║');
+  console.log('╠═══════════════════════════════════════════════════════════════╣');
+  console.log('║ Manual Connection:                                              ║');
+  console.log(`║ Token: ${AUTH_TOKEN}         ║`);
   console.log('╚═══════════════════════════════════════════════════════════════╝');
+  console.log('\n');
+  console.log('Tip: Open the app on your phone and tap "Scan QR Code" to connect instantly!');
+  console.log('\n');
+}
+
+server.listen(PORT, '0.0.0.0', () => {
+  displayStartupMessage();
 });
 
 // Handle graceful shutdown
