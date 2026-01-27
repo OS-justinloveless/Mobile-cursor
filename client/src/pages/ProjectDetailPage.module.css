@@ -330,3 +330,37 @@
   font-size: 14px;
   color: var(--text-muted);
 }
+
+.emptyHint {
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  margin-top: 4px;
+}
+
+/* New Chat Button */
+.newChatButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 20px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-md);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.newChatButton:hover:not(:disabled) {
+  background: var(--accent-hover, #3b82f6);
+  transform: translateY(-1px);
+}
+
+.newChatButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

@@ -7,6 +7,7 @@ struct ProjectsView: View {
     @State private var error: String?
     @State private var showCreateSheet = false
     @State private var selectedProject: Project?
+    @State private var openingProject: String?
     
     var body: some View {
         NavigationStack {
@@ -66,10 +67,11 @@ struct ProjectsView: View {
     private var projectsList: some View {
         List {
             ForEach(projects) { project in
-                ProjectRow(project: project) {
-                    selectedProject = project
-                } onOpen: {
-                    openProject(project)
+                ProjectRow(
+                    project: project,
+                    isOpening: openingProject == project.id
+                ) {
+                    selectProject(project)
                 }
             }
         }
@@ -102,13 +104,29 @@ struct ProjectsView: View {
         }
     }
     
-    private func openProject(_ project: Project) {
+    private func selectProject(_ project: Project) {
+        openingProject = project.id
+        
         Task {
-            guard let api = authManager.createAPIService() else { return }
+            guard let api = authManager.createAPIService() else {
+                openingProject = nil
+                return
+            }
+            
             do {
+                // Open project on server
                 try await api.openProject(id: project.id)
+                
+                // Navigate to project detail view
+                await MainActor.run {
+                    selectedProject = project
+                    openingProject = nil
+                }
             } catch {
-                self.error = error.localizedDescription
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                    openingProject = nil
+                }
             }
         }
     }
@@ -128,8 +146,8 @@ struct ProjectsView: View {
 
 struct ProjectRow: View {
     let project: Project
+    let isOpening: Bool
     let onSelect: () -> Void
-    let onOpen: () -> Void
     
     var body: some View {
         Button(action: onSelect) {
@@ -158,22 +176,19 @@ struct ProjectRow: View {
                 
                 Spacer()
                 
-                Button {
-                    onOpen()
-                } label: {
-                    Text("Open")
+                if isOpening {
+                    ProgressView()
+                        .padding(.trailing, 8)
+                } else {
+                    Image(systemName: "chevron.right")
                         .font(.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.accentColor)
-                        .foregroundColor(.white)
-                        .cornerRadius(6)
+                        .foregroundColor(.secondary)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
+        .disabled(isOpening)
     }
     
     private func formatDate(_ date: Date) -> String {

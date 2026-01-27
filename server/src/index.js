@@ -3,7 +3,6 @@ import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import { config } from 'dotenv';
-import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
@@ -22,10 +21,17 @@ const wss = new WebSocketServer({ server });
 
 // Configuration
 const PORT = process.env.PORT || 3847;
-const AUTH_TOKEN = process.env.AUTH_TOKEN || uuidv4();
 
-// Initialize auth manager
-const authManager = new AuthManager(AUTH_TOKEN);
+// Initialize auth manager with persistence
+// If AUTH_TOKEN env var is set, it overrides the persisted token
+// Otherwise, the token is loaded from disk (or generated once and saved)
+const authManager = new AuthManager({
+  dataDir: path.join(__dirname, '../.cursor-mobile-data'),
+  masterToken: process.env.AUTH_TOKEN || null  // Only override if explicitly set
+});
+
+// Get the auth token (may be loaded from persistence)
+const AUTH_TOKEN = authManager.getMasterToken();
 
 // Get local IP address
 function getLocalIP() {
@@ -159,6 +165,7 @@ server.listen(PORT, '0.0.0.0', () => {
 // Handle graceful shutdown
 process.on('SIGINT', () => {
   console.log('\nShutting down server...');
+  authManager.shutdown();  // Save auth state before exit
   server.close(() => {
     console.log('Server closed');
     process.exit(0);

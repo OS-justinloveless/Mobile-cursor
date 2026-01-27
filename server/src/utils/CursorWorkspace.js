@@ -167,7 +167,7 @@ export class CursorWorkspace {
 
   async buildTree(dirPath, currentDepth, maxDepth) {
     if (currentDepth >= maxDepth) {
-      return { truncated: true };
+      return null;
     }
     
     const entries = await fs.readdir(dirPath, { withFileTypes: true });

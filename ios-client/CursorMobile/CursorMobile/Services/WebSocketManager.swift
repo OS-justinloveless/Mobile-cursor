@@ -24,6 +24,10 @@ class WebSocketManager: ObservableObject {
     
     private let maxFileChanges = 50
     
+    // Terminal support
+    private var terminalOutputHandlers: [String: (String) -> Void] = [:]
+    private var terminalErrorHandlers: [String: (String) -> Void] = [:]
+    
     func connect(serverUrl: String, token: String) {
         self.serverUrl = serverUrl
         self.token = token
@@ -39,7 +43,26 @@ class WebSocketManager: ObservableObject {
         
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
+        
+        // Invalidate session to release resources
+        session?.invalidateAndCancel()
+        session = nil
+        
+        // Clear terminal handlers to release any captured references
+        terminalOutputHandlers.removeAll()
+        terminalErrorHandlers.removeAll()
+        
         isConnected = false
+    }
+    
+    deinit {
+        // Note: This is a @MainActor class, so deinit runs on main actor
+        // Cancel any pending tasks
+        reconnectTask?.cancel()
+        receiveTask?.cancel()
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        session?.invalidateAndCancel()
+        print("[WebSocketManager] deinit called")
     }
     
     private func establishConnection() {
@@ -145,6 +168,25 @@ class WebSocketManager: ObservableObject {
                     fileChanges = Array(fileChanges.prefix(maxFileChanges))
                 }
                 
+            case "terminalAttached":
+                if let terminalId = json["terminalId"] as? String {
+                    print("WebSocket: Terminal attached - \(terminalId)")
+                }
+                
+            case "terminalData":
+                if let terminalId = json["terminalId"] as? String,
+                   let data = json["data"] as? String,
+                   let handler = terminalOutputHandlers[terminalId] {
+                    handler(data)
+                }
+                
+            case "terminalError":
+                if let terminalId = json["terminalId"] as? String,
+                   let message = json["message"] as? String,
+                   let handler = terminalErrorHandlers[terminalId] {
+                    handler(message)
+                }
+                
             default:
                 break
             }
@@ -186,5 +228,42 @@ class WebSocketManager: ObservableObject {
     
     func unwatchPath(_ path: String) {
         send(["type": "unwatch", "path": path])
+    }
+    
+    // MARK: - Terminal Methods
+    
+    func attachTerminal(_ terminalId: String, projectPath: String? = nil, onData: @escaping (String) -> Void, onError: @escaping (String) -> Void = { _ in }) {
+        terminalOutputHandlers[terminalId] = onData
+        terminalErrorHandlers[terminalId] = onError
+        var message: [String: Any] = ["type": "terminalAttach", "terminalId": terminalId]
+        if let projectPath = projectPath {
+            message["projectPath"] = projectPath
+        }
+        send(message)
+        print("WebSocket: Attaching to terminal \(terminalId)")
+    }
+    
+    func detachTerminal(_ terminalId: String) {
+        terminalOutputHandlers.removeValue(forKey: terminalId)
+        terminalErrorHandlers.removeValue(forKey: terminalId)
+        send(["type": "terminalDetach", "terminalId": terminalId])
+        print("WebSocket: Detaching from terminal \(terminalId)")
+    }
+    
+    func sendTerminalInput(_ terminalId: String, data: String) {
+        send([
+            "type": "terminalInput",
+            "terminalId": terminalId,
+            "data": data
+        ])
+    }
+    
+    func resizeTerminal(_ terminalId: String, cols: Int, rows: Int) {
+        send([
+            "type": "terminalResize",
+            "terminalId": terminalId,
+            "cols": cols,
+            "rows": rows
+        ])
     }
 }

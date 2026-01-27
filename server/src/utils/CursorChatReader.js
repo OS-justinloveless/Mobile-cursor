@@ -3,11 +3,13 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { MobileChatStore } from './MobileChatStore.js';
 
 export class CursorChatReader {
   constructor() {
     this.workspacePath = this.getWorkspaceStoragePath();
     this.globalStoragePath = this.getGlobalStoragePath();
+    this.mobileChatStore = MobileChatStore.getInstance();
   }
 
   getWorkspaceStoragePath() {
@@ -48,21 +50,93 @@ export class CursorChatReader {
   }
 
   /**
-   * Get all chat logs from both global and workspace storage
+   * Get all chat logs from global storage, workspace storage, and mobile store
+   * 
+   * Cursor stores chats in multiple places:
+   * - Global storage: Contains bubble data (messages) with workspaceId = 'global'
+   * - Workspace storage: Contains composer metadata with proper workspaceFolder
+   * 
+   * Many chats exist in BOTH, so we need to merge them properly:
+   * - Use workspace metadata when available (for project association)
+   * - Use global message counts (often more accurate)
    */
   async getAllChats() {
+    const chatMap = new Map(); // id -> chat object
+    
+    // First, load global storage chats
+    const globalChats = await this.getGlobalStorageChats();
+    for (const chat of globalChats) {
+      chatMap.set(chat.id, chat);
+    }
+    
+    // Then, load workspace chats and MERGE with global data
+    // Workspace data has better metadata (workspaceFolder, projectName)
+    const workspaceChats = await this.getWorkspaceChats();
+    for (const chat of workspaceChats) {
+      const existing = chatMap.get(chat.id);
+      if (existing) {
+        // Merge: prefer workspace metadata, but keep global message count if higher
+        chatMap.set(chat.id, {
+          ...existing,
+          ...chat,
+          // Keep the higher message count (global often has the actual bubbles)
+          messageCount: Math.max(existing.messageCount || 0, chat.messageCount || 0),
+          // Mark that this chat exists in both storages
+          source: 'workspace'
+        });
+      } else {
+        chatMap.set(chat.id, chat);
+      }
+    }
+    
+    // Finally, load mobile chats and merge
+    const mobileChats = await this.getMobileChats();
+    for (const chat of mobileChats) {
+      const existing = chatMap.get(chat.id);
+      if (existing) {
+        // Merge: update with mobile message count if higher
+        chatMap.set(chat.id, {
+          ...existing,
+          hasMobileMessages: true,
+          messageCount: Math.max(existing.messageCount || 0, chat.messageCount || 0)
+        });
+      } else {
+        chatMap.set(chat.id, chat);
+      }
+    }
+    
+    // Convert to array and sort by timestamp, newest first
+    const chats = Array.from(chatMap.values());
+    chats.sort((a, b) => b.timestamp - a.timestamp);
+    
+    return chats;
+  }
+
+  /**
+   * Get chats from mobile store
+   */
+  async getMobileChats() {
     const chats = [];
     
-    // Get chats from global storage (newer Cursor versions)
-    const globalChats = await this.getGlobalStorageChats();
-    chats.push(...globalChats);
-    
-    // Get chats from workspace storage (legacy and current)
-    const workspaceChats = await this.getWorkspaceChats();
-    chats.push(...workspaceChats);
-    
-    // Sort by timestamp, newest first
-    chats.sort((a, b) => b.timestamp - a.timestamp);
+    try {
+      const mobileConversations = await this.mobileChatStore.getAllConversations();
+      
+      for (const conv of mobileConversations) {
+        chats.push({
+          id: conv.id,
+          type: conv.type || 'chat',
+          title: conv.title || `Chat ${conv.id.slice(0, 8)}`,
+          timestamp: conv.updatedAt || conv.createdAt || Date.now(),
+          messageCount: conv.messageCount || 0,
+          workspaceId: conv.workspaceId || 'global',
+          workspaceFolder: conv.workspaceFolder,
+          projectName: conv.projectName,
+          source: 'mobile'
+        });
+      }
+    } catch (error) {
+      console.error('Error reading mobile chats:', error);
+    }
     
     return chats;
   }
@@ -293,19 +367,123 @@ export class CursorChatReader {
 
   /**
    * Get messages for a specific chat
+   * Merges messages from Cursor IDE storage and mobile store
    */
   async getChatMessages(chatId, type = 'chat', workspaceId = 'global') {
-    const messages = [];
+    let cursorMessages = [];
     
+    // Get messages from Cursor IDE storage
     if (workspaceId === 'global') {
-      return this.getGlobalChatMessages(chatId);
+      cursorMessages = await this.getGlobalChatMessages(chatId);
     } else {
       if (type === 'composer') {
-        return this.getComposerMessages(chatId, workspaceId);
+        cursorMessages = await this.getComposerMessages(chatId, workspaceId);
       } else {
-        return this.getWorkspaceChatMessages(chatId, workspaceId);
+        cursorMessages = await this.getWorkspaceChatMessages(chatId, workspaceId);
       }
     }
+    
+    // Get messages from mobile store
+    const mobileMessages = await this.getMobileMessages(chatId);
+    
+    // Merge messages, avoiding duplicates
+    const mergedMessages = this.mergeMessages(cursorMessages, mobileMessages);
+    
+    return mergedMessages;
+  }
+
+  /**
+   * Get messages from mobile store
+   */
+  async getMobileMessages(chatId) {
+    const messages = [];
+    
+    try {
+      const mobileMessages = await this.mobileChatStore.getMessages(chatId);
+      
+      for (const msg of mobileMessages) {
+        messages.push({
+          id: msg.id,
+          type: msg.type === 'user' ? 'user' : 'assistant',
+          text: msg.text || '',
+          timestamp: msg.timestamp || Date.now(),
+          modelType: null,
+          codeBlocks: this.extractCodeBlocksFromText(msg.text),
+          toolCalls: msg.toolCalls || null,
+          source: 'mobile'
+        });
+      }
+    } catch (error) {
+      console.error('Error reading mobile messages:', error);
+    }
+    
+    return messages;
+  }
+
+  /**
+   * Extract code blocks from markdown text
+   */
+  extractCodeBlocksFromText(text) {
+    if (!text) return [];
+    
+    const codeBlocks = [];
+    const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+    let match;
+    
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+      codeBlocks.push({
+        type: 'code',
+        language: match[1] || 'text',
+        content: match[2]
+      });
+    }
+    
+    return codeBlocks;
+  }
+
+  /**
+   * Merge messages from Cursor IDE and mobile store
+   * Removes duplicates based on content and timestamp proximity
+   */
+  mergeMessages(cursorMessages, mobileMessages) {
+    // If one is empty, return the other
+    if (cursorMessages.length === 0) return mobileMessages;
+    if (mobileMessages.length === 0) return cursorMessages;
+    
+    const merged = [...cursorMessages];
+    const cursorTimestamps = new Set(cursorMessages.map(m => m.timestamp));
+    
+    // Add mobile messages that don't have a close timestamp match in cursor messages
+    for (const mobileMsg of mobileMessages) {
+      // Check if this message already exists in cursor messages
+      const isDuplicate = cursorMessages.some(cursorMsg => {
+        // Consider duplicate if same type and similar timestamp (within 5 seconds)
+        if (cursorMsg.type !== mobileMsg.type) return false;
+        const timeDiff = Math.abs((cursorMsg.timestamp || 0) - (mobileMsg.timestamp || 0));
+        if (timeDiff > 5000) return false;
+        
+        // Also check text similarity for user messages
+        if (mobileMsg.type === 'user') {
+          const cursorText = (cursorMsg.text || '').slice(0, 100);
+          const mobileText = (mobileMsg.text || '').slice(0, 100);
+          return cursorText === mobileText;
+        }
+        
+        return true;
+      });
+      
+      if (!isDuplicate) {
+        merged.push({
+          ...mobileMsg,
+          source: 'mobile'
+        });
+      }
+    }
+    
+    // Sort by timestamp
+    merged.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    
+    return merged;
   }
 
   /**
@@ -339,6 +517,7 @@ export class CursorChatReader {
             timestamp: bubble.timestamp || Date.now(),
             modelType: bubble.modelType || null,
             codeBlocks: this.extractCodeBlocks(bubble),
+            toolCalls: this.extractToolCalls(bubble),
             selections: bubble.selections || [],
             relevantFiles: bubble.relevantFiles || []
           });
@@ -390,7 +569,8 @@ export class CursorChatReader {
                 text: bubble.text || '',
                 timestamp: bubble.timestamp || Date.now(),
                 modelType: bubble.modelType || null,
-                codeBlocks: this.extractCodeBlocks(bubble)
+                codeBlocks: this.extractCodeBlocks(bubble),
+                toolCalls: this.extractToolCalls(bubble)
               });
             }
           }
@@ -456,7 +636,8 @@ export class CursorChatReader {
             text: msg.text || msg.richText || '',
             timestamp: msg.timestamp || Date.now(),
             context: msg.context || null,
-            codeBlocks: this.extractCodeBlocks(msg)
+            codeBlocks: this.extractCodeBlocks(msg),
+            toolCalls: this.extractToolCalls(msg)
           });
         }
       }
@@ -504,7 +685,8 @@ export class CursorChatReader {
             type: bubble.type === 1 || bubble.type === 'user' ? 'user' : 'assistant',
             text: bubble.text || bubble.richText || '',
             timestamp: bubble.timestamp || Date.now(),
-            codeBlocks: this.extractCodeBlocks(bubble)
+            codeBlocks: this.extractCodeBlocks(bubble),
+            toolCalls: this.extractToolCalls(bubble)
           });
         } catch (e) {
           // Skip invalid entries
@@ -556,6 +738,72 @@ export class CursorChatReader {
   }
 
   /**
+   * Extract tool calls from a bubble/message
+   * Cursor stores tool calls in various formats depending on version
+   */
+  extractToolCalls(bubble) {
+    const toolCalls = [];
+    
+    // Check for toolResults (common in composer format)
+    if (bubble.toolResults && Array.isArray(bubble.toolResults)) {
+      for (const tool of bubble.toolResults) {
+        toolCalls.push({
+          id: tool.id || tool.toolUseId || `tool-${toolCalls.length}`,
+          name: tool.name || tool.toolName || 'Unknown',
+          input: tool.input || tool.args || {},
+          status: tool.error ? 'error' : 'complete',
+          result: tool.result || tool.output || null
+        });
+      }
+    }
+    
+    // Check for toolCalls array
+    if (bubble.toolCalls && Array.isArray(bubble.toolCalls)) {
+      for (const tool of bubble.toolCalls) {
+        toolCalls.push({
+          id: tool.id || `tool-${toolCalls.length}`,
+          name: tool.name || tool.function?.name || 'Unknown',
+          input: tool.input || tool.function?.arguments || tool.args || {},
+          status: tool.status || 'complete',
+          result: tool.result || tool.output || null
+        });
+      }
+    }
+    
+    // Check for tool_use in content array (Anthropic format)
+    if (bubble.content && Array.isArray(bubble.content)) {
+      for (const item of bubble.content) {
+        if (item.type === 'tool_use') {
+          toolCalls.push({
+            id: item.id,
+            name: item.name,
+            input: item.input || {},
+            status: 'complete',
+            result: null
+          });
+        }
+      }
+    }
+    
+    // Check for codeBlocks that are actually tool calls (Cursor-specific)
+    if (bubble.codeBlocks && Array.isArray(bubble.codeBlocks)) {
+      for (const block of bubble.codeBlocks) {
+        if (block.type === 'tool' || block.toolName) {
+          toolCalls.push({
+            id: block.id || `tool-${toolCalls.length}`,
+            name: block.toolName || block.name || 'Tool',
+            input: block.input || block.args || {},
+            status: block.error ? 'error' : 'complete',
+            result: block.result || block.output || null
+          });
+        }
+      }
+    }
+    
+    return toolCalls.length > 0 ? toolCalls : null;
+  }
+
+  /**
    * Extract chat ID from bubble key
    */
   extractChatIdFromBubbleKey(key) {
@@ -604,20 +852,28 @@ export class CursorChatReader {
 
   /**
    * Get all chats for a specific project path
+   * Returns only project-scoped chats (from workspace storage and mobile store)
    */
   async getChatsByProjectPath(projectPath) {
     const allChats = await this.getAllChats();
     
     // Normalize the project path for comparison
     const normalizedProjectPath = projectPath.replace(/\/$/, ''); // Remove trailing slash
+    const projectName = normalizedProjectPath.split('/').pop();
     
     return allChats.filter(chat => {
-      if (!chat.workspaceFolder) return false;
+      // Check workspaceFolder (file:// format) - workspace-specific chats
+      if (chat.workspaceFolder) {
+        const chatPath = chat.workspaceFolder.replace('file://', '').replace(/\/$/, '');
+        if (chatPath === normalizedProjectPath) return true;
+      }
       
-      // workspaceFolder is stored as file:///path/to/project
-      const chatPath = chat.workspaceFolder.replace('file://', '').replace(/\/$/, '');
+      // Check if mobile-created chats have matching workspaceId or projectName
+      if (chat.source === 'mobile' && chat.projectName) {
+        if (chat.projectName === projectName) return true;
+      }
       
-      return chatPath === normalizedProjectPath;
+      return false;
     });
   }
 

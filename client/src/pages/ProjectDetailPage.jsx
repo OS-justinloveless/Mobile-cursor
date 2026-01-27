@@ -13,6 +13,7 @@ export default function ProjectDetailPage() {
   const [error, setError] = useState(null);
   const [expandedDirs, setExpandedDirs] = useState(new Set());
   const [activeTab, setActiveTab] = useState('files'); // 'files' or 'chats'
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
   
   const { apiRequest } = useAuth();
   const { watchPath, fileChanges } = useWebSocket();
@@ -68,6 +69,33 @@ export default function ProjectDetailPage() {
       });
     } catch (err) {
       console.error('Failed to open project:', err);
+    }
+  }
+
+  async function createNewChat() {
+    if (isCreatingChat) return;
+    
+    try {
+      setIsCreatingChat(true);
+      const response = await apiRequest('/api/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: projectId })
+      });
+      
+      const data = await response.json();
+      
+      if (data.chatId) {
+        // Navigate to the new chat
+        navigate(`/chat/${data.chatId}?type=chat&workspaceId=${projectId}`);
+      } else {
+        console.error('No chatId returned from create conversation');
+      }
+    } catch (err) {
+      console.error('Failed to create chat:', err);
+      setError('Failed to create new chat: ' + err.message);
+    } finally {
+      setIsCreatingChat(false);
     }
   }
 
@@ -172,10 +200,19 @@ export default function ProjectDetailPage() {
       {/* Chats Tab */}
       {activeTab === 'chats' && (
         <div className={styles.chatList}>
+          <button 
+            className={styles.newChatButton} 
+            onClick={createNewChat}
+            disabled={isCreatingChat}
+          >
+            {isCreatingChat ? '⏳ Creating...' : '➕ New Chat'}
+          </button>
+          
           {conversations.length === 0 ? (
             <div className={styles.emptyChats}>
               <span className={styles.emptyIcon}>💬</span>
               <p>No conversations for this project yet</p>
+              <p className={styles.emptyHint}>Start a new chat to begin</p>
             </div>
           ) : (
             conversations.map((conversation) => (

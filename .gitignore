@@ -9,6 +9,9 @@ client/dist/
 .env.local
 .env.*.local
 
+# Cursor Mobile auth persistence (contains sensitive tokens)
+.cursor-mobile-data/
+
 # Logs
 *.log
 npm-debug.log*
@@ -25,3 +28,12 @@ Thumbs.db
 
 # Cache
 .cache/
+
+# iOS/Xcode
+ios-client/build/
+**/xcuserdata/
+**/DerivedData/
+*.xcuserstate
+*.ipa
+*.dSYM.zip
+*.dSYM

@@ -7,11 +7,12 @@ SCHEME = CursorMobile
 CONFIGURATION = Debug
 DERIVED_DATA = build/DerivedData
 
-# Default simulator (can override with: make run SIMULATOR="iPhone 15 Pro")
+# Default simulator (can override with: make run SIMULATOR="iPhone 16")
 SIMULATOR ?= iPhone 16
+SIMULATOR_OS ?= 18.5
 
 # Build destinations
-SIMULATOR_DEST = platform=iOS Simulator,name=$(SIMULATOR)
+SIMULATOR_DEST = platform=iOS Simulator,name=$(SIMULATOR),OS=$(SIMULATOR_OS)
 DEVICE_DEST = generic/platform=iOS
 
 .PHONY: all build build-release run clean install list-simulators list-devices help
@@ -123,7 +124,7 @@ archive:
 help:
 	@echo "Cursor Mobile iOS App - Build Commands"
 	@echo ""
-	@echo "Usage: make [target] [SIMULATOR='iPhone Name']"
+	@echo "Usage: make [target] [SIMULATOR='iPhone Name'] [SIMULATOR_OS='18.5']"
 	@echo ""
 	@echo "Targets:"
 	@echo "  build            Build for simulator (debug)"
@@ -141,6 +142,6 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build"
-	@echo "  make run SIMULATOR='iPhone 15 Pro'"
-	@echo "  make run SIMULATOR='iPad Pro (12.9-inch) (6th generation)'"
+	@echo "  make run SIMULATOR='iPhone 16' SIMULATOR_OS='18.5'"
+	@echo "  make run SIMULATOR='iPhone 17 Pro' SIMULATOR_OS='26.2'"
 	@echo "  make clean && make build"

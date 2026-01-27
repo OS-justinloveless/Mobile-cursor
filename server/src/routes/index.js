@@ -2,12 +2,16 @@ import { projectRoutes } from './projects.js';
 import { fileRoutes } from './files.js';
 import { conversationRoutes } from './conversations.js';
 import { systemRoutes } from './system.js';
+import { terminalRoutes } from './terminals.js';
+import { gitRoutes } from './git.js';
 
 export function setupRoutes(app) {
   app.use('/api/projects', projectRoutes);
   app.use('/api/files', fileRoutes);
   app.use('/api/conversations', conversationRoutes);
   app.use('/api/system', systemRoutes);
+  app.use('/api/terminals', terminalRoutes);
+  app.use('/api/git', gitRoutes);
   
   // Health check (no auth required)
   app.get('/health', (req, res) => {

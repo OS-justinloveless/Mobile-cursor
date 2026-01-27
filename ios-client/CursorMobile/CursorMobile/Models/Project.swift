@@ -49,16 +49,27 @@ struct ProjectResponse: Codable {
 }
 
 struct ProjectTree: Codable {
-    let tree: [FileTreeItem]
+    let tree: [FileTreeItem]?
 }
 
 struct FileTreeItem: Codable, Identifiable, Hashable {
     let name: String
     let path: String
-    let isDirectory: Bool
+    let type: String
     let children: [FileTreeItem]?
+    let size: Int?
+    let `extension`: String?
     
     var id: String { path }
+    
+    var isDirectory: Bool {
+        type == "directory"
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case name, path, type, children, size
+        case `extension` = "extension"
+    }
 }
 
 struct CreateProjectRequest: Codable {

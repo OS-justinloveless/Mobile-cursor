@@ -1,7 +1,40 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useAuth } from '../context/AuthContext';
 import styles from './ChatDetailPage.module.css';
+
+// Tool call display names and icons
+const TOOL_DISPLAY_INFO = {
+  Read: { icon: '📄', name: 'Read File', getDescription: (input) => input?.path ? `Reading ${input.path.split('/').pop()}` : 'Reading file' },
+  Write: { icon: '✏️', name: 'Write File', getDescription: (input) => input?.path ? `Writing to ${input.path.split('/').pop()}` : 'Writing file' },
+  Edit: { icon: '🔧', name: 'Edit File', getDescription: (input) => input?.path ? `Editing ${input.path.split('/').pop()}` : 'Editing file' },
+  StrReplace: { icon: '🔄', name: 'Replace Text', getDescription: (input) => input?.path ? `Replacing in ${input.path.split('/').pop()}` : 'Replacing text' },
+  Shell: { icon: '💻', name: 'Run Command', getDescription: (input) => input?.command ? `$ ${input.command.slice(0, 50)}${input.command.length > 50 ? '...' : ''}` : 'Running command' },
+  Bash: { icon: '💻', name: 'Run Command', getDescription: (input) => input?.command ? `$ ${input.command.slice(0, 50)}${input.command.length > 50 ? '...' : ''}` : 'Running command' },
+  Grep: { icon: '🔍', name: 'Search', getDescription: (input) => input?.pattern ? `Searching for "${input.pattern.slice(0, 30)}"` : 'Searching' },
+  Glob: { icon: '📂', name: 'Find Files', getDescription: (input) => input?.pattern ? `Finding ${input.pattern}` : 'Finding files' },
+  LS: { icon: '📁', name: 'List Directory', getDescription: (input) => input?.path ? `Listing ${input.path.split('/').pop() || input.path}` : 'Listing directory' },
+  SemanticSearch: { icon: '🧠', name: 'Semantic Search', getDescription: (input) => input?.query ? `Searching: "${input.query.slice(0, 40)}"` : 'Semantic search' },
+  WebSearch: { icon: '🌐', name: 'Web Search', getDescription: (input) => input?.query ? `Searching web: "${input.query.slice(0, 40)}"` : 'Web search' },
+  WebFetch: { icon: '🌍', name: 'Fetch URL', getDescription: (input) => input?.url ? `Fetching ${new URL(input.url).hostname}` : 'Fetching URL' },
+  Task: { icon: '🤖', name: 'Run Task', getDescription: (input) => input?.description || 'Running subtask' },
+  TodoWrite: { icon: '✅', name: 'Update Todos', getDescription: () => 'Updating task list' },
+  Delete: { icon: '🗑️', name: 'Delete File', getDescription: (input) => input?.path ? `Deleting ${input.path.split('/').pop()}` : 'Deleting file' },
+  default: { icon: '🔧', name: 'Tool', getDescription: () => 'Running tool' }
+};
+
+function getToolDisplayInfo(toolName, input) {
+  const info = TOOL_DISPLAY_INFO[toolName] || TOOL_DISPLAY_INFO.default;
+  return {
+    icon: info.icon,
+    name: info.name || toolName,
+    description: info.getDescription(input)
+  };
+}
 
 export default function ChatDetailPage() {
   const { chatId } = useParams();
@@ -14,6 +47,7 @@ export default function ChatDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedCodeBlocks, setExpandedCodeBlocks] = useState(new Set());
+  const [expandedToolCalls, setExpandedToolCalls] = useState(new Set());
   const [messageInput, setMessageInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState(null);
@@ -77,7 +111,7 @@ export default function ChatDetailPage() {
     setMessageInput('');
     setIsSending(true);
     setError(null); // Clear previous errors
-    setStreamingMessage({ type: 'assistant', text: '', timestamp: Date.now() });
+    setStreamingMessage({ type: 'assistant', text: '', toolCalls: [], timestamp: Date.now() });
     
     // Add user message to UI immediately
     const newUserMessage = {
@@ -126,6 +160,7 @@ export default function ChatDetailPage() {
       const decoder = new TextDecoder();
       let buffer = '';
       let assistantText = '';
+      let toolCalls = [];
       let eventCount = 0;
       
       while (true) {
@@ -155,18 +190,40 @@ export default function ChatDetailPage() {
                 console.log('System event:', data.subtype);
               } else if (data.type === 'assistant') {
                 // cursor-agent sends assistant messages with this structure:
-                // {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"..."}]}}
+                // {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"..."},{"type":"tool_use",...}]}}
                 if (data.message?.content) {
                   for (const contentItem of data.message.content) {
                     if (contentItem.type === 'text' && contentItem.text) {
                       assistantText += contentItem.text;
-                      setStreamingMessage({
-                        type: 'assistant',
-                        text: assistantText,
-                        timestamp: Date.now()
-                      });
+                    } else if (contentItem.type === 'tool_use') {
+                      // Add tool call to the list
+                      const existingIndex = toolCalls.findIndex(tc => tc.id === contentItem.id);
+                      if (existingIndex === -1) {
+                        toolCalls.push({
+                          id: contentItem.id,
+                          name: contentItem.name,
+                          input: contentItem.input,
+                          status: 'running'
+                        });
+                      }
+                    } else if (contentItem.type === 'tool_result') {
+                      // Mark tool call as complete
+                      const toolIndex = toolCalls.findIndex(tc => tc.id === contentItem.tool_use_id);
+                      if (toolIndex !== -1) {
+                        toolCalls[toolIndex] = {
+                          ...toolCalls[toolIndex],
+                          status: contentItem.is_error ? 'error' : 'complete',
+                          result: contentItem.content
+                        };
+                      }
                     }
                   }
+                  setStreamingMessage({
+                    type: 'assistant',
+                    text: assistantText,
+                    toolCalls: [...toolCalls],
+                    timestamp: Date.now()
+                  });
                 }
               } else if (data.type === 'text') {
                 // Fallback for simple text messages
@@ -174,6 +231,7 @@ export default function ChatDetailPage() {
                 setStreamingMessage({
                   type: 'assistant',
                   text: assistantText,
+                  toolCalls: [...toolCalls],
                   timestamp: Date.now()
                 });
               } else if (data.type === 'stderr') {
@@ -183,9 +241,14 @@ export default function ChatDetailPage() {
                 // Finalize the message
                 if (data.success) {
                   console.log('✓ Message sent successfully');
+                  // Mark any running tools as complete
+                  const finalToolCalls = toolCalls.map(tc => 
+                    tc.status === 'running' ? { ...tc, status: 'complete' } : tc
+                  );
                   const finalMessage = {
                     type: 'assistant',
                     text: assistantText,
+                    toolCalls: finalToolCalls,
                     timestamp: Date.now(),
                     id: `response-${Date.now()}`
                   };
@@ -264,83 +327,215 @@ export default function ChatDetailPage() {
     setExpandedCodeBlocks(newExpanded);
   }
 
-  function renderMessageContent(text, codeBlocks, messageIndex) {
+  function toggleToolCall(toolId) {
+    const newExpanded = new Set(expandedToolCalls);
+    if (newExpanded.has(toolId)) {
+      newExpanded.delete(toolId);
+    } else {
+      newExpanded.add(toolId);
+    }
+    setExpandedToolCalls(newExpanded);
+  }
+
+  function renderToolCalls(toolCalls) {
+    if (!toolCalls || toolCalls.length === 0) return null;
+
+    return (
+      <div className={styles.toolCallsContainer}>
+        {toolCalls.map((tool) => {
+          const isExpanded = expandedToolCalls.has(tool.id);
+          const displayInfo = getToolDisplayInfo(tool.name, tool.input);
+          
+          return (
+            <div 
+              key={tool.id} 
+              className={`${styles.toolCall} ${styles[`toolCall${tool.status}`]}`}
+            >
+              <button
+                className={styles.toolCallHeader}
+                onClick={() => toggleToolCall(tool.id)}
+                aria-expanded={isExpanded}
+              >
+                <span className={styles.toolCallIcon}>{displayInfo.icon}</span>
+                <span className={styles.toolCallInfo}>
+                  <span className={styles.toolCallName}>{displayInfo.name}</span>
+                  <span className={styles.toolCallDescription}>{displayInfo.description}</span>
+                </span>
+                <span className={styles.toolCallStatus}>
+                  {tool.status === 'running' && <span className={styles.toolCallSpinner} />}
+                  {tool.status === 'complete' && <span className={styles.toolCallCheck}>✓</span>}
+                  {tool.status === 'error' && <span className={styles.toolCallError}>✗</span>}
+                </span>
+                <span className={`${styles.toolCallChevron} ${isExpanded ? styles.expanded : ''}`}>
+                  ▶
+                </span>
+              </button>
+              
+              {isExpanded && (
+                <div className={styles.toolCallDetails}>
+                  {tool.input && (
+                    <div className={styles.toolCallSection}>
+                      <div className={styles.toolCallSectionLabel}>Input</div>
+                      <pre className={styles.toolCallJson}>
+                        {JSON.stringify(tool.input, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {tool.result && (
+                    <div className={styles.toolCallSection}>
+                      <div className={styles.toolCallSectionLabel}>Result</div>
+                      <pre className={styles.toolCallJson}>
+                        {typeof tool.result === 'string' 
+                          ? tool.result.slice(0, 2000) + (tool.result.length > 2000 ? '\n...(truncated)' : '')
+                          : JSON.stringify(tool.result, null, 2).slice(0, 2000)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Custom components for ReactMarkdown
+  const markdownComponents = {
+    // Code blocks with syntax highlighting
+    code({ node, inline, className, children, ...props }) {
+      const match = /language-(\w+)/.exec(className || '');
+      const language = match ? match[1] : '';
+      const codeString = String(children).replace(/\n$/, '');
+      
+      if (!inline && (match || codeString.includes('\n'))) {
+        const lines = codeString.split('\n');
+        const shouldCollapse = lines.length > 15;
+        const blockId = `code-${Math.random().toString(36).substr(2, 9)}`;
+        const isExpanded = expandedCodeBlocks.has(blockId);
+        
+        return (
+          <div className={styles.codeBlock}>
+            <div className={styles.codeHeader}>
+              <span className={styles.codeLanguage}>{language || 'code'}</span>
+              {shouldCollapse && (
+                <button 
+                  className={styles.expandButton}
+                  onClick={() => toggleCodeBlock(blockId)}
+                >
+                  {isExpanded ? 'Collapse' : `Expand (${lines.length} lines)`}
+                </button>
+              )}
+              <button 
+                className={styles.copyButton}
+                onClick={() => navigator.clipboard.writeText(codeString)}
+              >
+                Copy
+              </button>
+            </div>
+            <div className={`${styles.codeContent} ${shouldCollapse && !isExpanded ? styles.collapsed : ''}`}>
+              <SyntaxHighlighter
+                style={vscDarkPlus}
+                language={language || 'text'}
+                PreTag="div"
+                customStyle={{
+                  margin: 0,
+                  padding: '12px',
+                  background: 'transparent',
+                  fontSize: '13px',
+                }}
+                {...props}
+              >
+                {codeString}
+              </SyntaxHighlighter>
+            </div>
+          </div>
+        );
+      }
+      
+      // Inline code
+      return (
+        <code className={styles.inlineCode} {...props}>
+          {children}
+        </code>
+      );
+    },
+    // Paragraphs
+    p({ children }) {
+      return <p className={styles.markdownParagraph}>{children}</p>;
+    },
+    // Headers
+    h1({ children }) {
+      return <h1 className={styles.markdownH1}>{children}</h1>;
+    },
+    h2({ children }) {
+      return <h2 className={styles.markdownH2}>{children}</h2>;
+    },
+    h3({ children }) {
+      return <h3 className={styles.markdownH3}>{children}</h3>;
+    },
+    h4({ children }) {
+      return <h4 className={styles.markdownH4}>{children}</h4>;
+    },
+    // Lists
+    ul({ children }) {
+      return <ul className={styles.markdownList}>{children}</ul>;
+    },
+    ol({ children }) {
+      return <ol className={styles.markdownOrderedList}>{children}</ol>;
+    },
+    li({ children }) {
+      return <li className={styles.markdownListItem}>{children}</li>;
+    },
+    // Links
+    a({ href, children }) {
+      return (
+        <a href={href} className={styles.markdownLink} target="_blank" rel="noopener noreferrer">
+          {children}
+        </a>
+      );
+    },
+    // Blockquotes
+    blockquote({ children }) {
+      return <blockquote className={styles.markdownBlockquote}>{children}</blockquote>;
+    },
+    // Tables
+    table({ children }) {
+      return <table className={styles.markdownTable}>{children}</table>;
+    },
+    th({ children }) {
+      return <th className={styles.markdownTh}>{children}</th>;
+    },
+    td({ children }) {
+      return <td className={styles.markdownTd}>{children}</td>;
+    },
+    // Horizontal rule
+    hr() {
+      return <hr className={styles.markdownHr} />;
+    },
+    // Strong/Bold
+    strong({ children }) {
+      return <strong className={styles.markdownStrong}>{children}</strong>;
+    },
+    // Emphasis/Italic
+    em({ children }) {
+      return <em className={styles.markdownEm}>{children}</em>;
+    },
+  };
+
+  function renderMessageContent(text) {
     if (!text) return null;
     
-    // Split content by code blocks
-    const codeBlockPattern = /```(\w*)\n([\s\S]*?)```/g;
-    const parts = [];
-    let lastIndex = 0;
-    let match;
-    let blockIndex = 0;
-    
-    while ((match = codeBlockPattern.exec(text)) !== null) {
-      // Add text before code block
-      if (match.index > lastIndex) {
-        parts.push({
-          type: 'text',
-          content: text.slice(lastIndex, match.index)
-        });
-      }
-      
-      // Add code block
-      parts.push({
-        type: 'code',
-        language: match[1] || 'text',
-        content: match[2],
-        id: `${messageIndex}-${blockIndex++}`
-      });
-      
-      lastIndex = match.index + match[0].length;
-    }
-    
-    // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push({
-        type: 'text',
-        content: text.slice(lastIndex)
-      });
-    }
-    
-    // If no code blocks found, return as plain text
-    if (parts.length === 0) {
-      return <p className={styles.textContent}>{text}</p>;
-    }
-    
-    return parts.map((part, idx) => {
-      if (part.type === 'text') {
-        return <p key={idx} className={styles.textContent}>{part.content}</p>;
-      }
-      
-      const isExpanded = expandedCodeBlocks.has(part.id);
-      const lines = part.content.split('\n');
-      const shouldCollapse = lines.length > 10;
-      
-      return (
-        <div key={idx} className={styles.codeBlock}>
-          <div className={styles.codeHeader}>
-            <span className={styles.codeLanguage}>{part.language}</span>
-            {shouldCollapse && (
-              <button 
-                className={styles.expandButton}
-                onClick={() => toggleCodeBlock(part.id)}
-              >
-                {isExpanded ? 'Collapse' : `Expand (${lines.length} lines)`}
-              </button>
-            )}
-            <button 
-              className={styles.copyButton}
-              onClick={() => navigator.clipboard.writeText(part.content)}
-            >
-              Copy
-            </button>
-          </div>
-          <pre className={`${styles.codeContent} ${shouldCollapse && !isExpanded ? styles.collapsed : ''}`}>
-            <code>{part.content}</code>
-          </pre>
-        </div>
-      );
-    });
+    return (
+      <div className={styles.markdownContent}>
+        <ReactMarkdown 
+          remarkPlugins={[remarkGfm]}
+          components={markdownComponents}
+        >
+          {text}
+        </ReactMarkdown>
+      </div>
+    );
   }
 
   if (isLoading) {
@@ -418,7 +613,8 @@ export default function ChatDetailPage() {
                   </span>
                 </div>
                 <div className={styles.messageContent}>
-                  {renderMessageContent(message.text, message.codeBlocks, index)}
+                  {renderToolCalls(message.toolCalls)}
+                  {renderMessageContent(message.text)}
                 </div>
                 {message.relevantFiles && message.relevantFiles.length > 0 && (
                   <div className={styles.relevantFiles}>
@@ -443,7 +639,8 @@ export default function ChatDetailPage() {
                   </span>
                 </div>
                 <div className={styles.messageContent}>
-                  {renderMessageContent(streamingMessage.text, [], 'streaming')}
+                  {renderToolCalls(streamingMessage.toolCalls)}
+                  {renderMessageContent(streamingMessage.text)}
                 </div>
               </div>
             )}
