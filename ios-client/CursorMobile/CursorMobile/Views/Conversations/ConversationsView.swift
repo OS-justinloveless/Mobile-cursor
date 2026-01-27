@@ -226,6 +226,7 @@ struct ConversationDetailView: View {
     @State private var forkedConversation: Conversation?
     @State private var showForkSuccess = false
     @FocusState private var isInputFocused: Bool
+    @State private var selectedImages: [SelectedImage] = []
     
     var body: some View {
         VStack(spacing: 0) {
@@ -512,6 +513,35 @@ struct ConversationDetailView: View {
         VStack(spacing: 0) {
             Divider()
             
+            // Image attachments preview
+            if !selectedImages.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(selectedImages) { selectedImage in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: selectedImage.image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 60, height: 60)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                
+                                Button {
+                                    removeImage(selectedImage)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white)
+                                        .background(Circle().fill(Color.black.opacity(0.5)))
+                                }
+                                .offset(x: 5, y: -5)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .padding(.top, 8)
+            }
+            
             HStack(alignment: .bottom, spacing: 12) {
                 // Text input
                 TextField("Type a message...", text: $messageInput, axis: .vertical)
@@ -526,6 +556,10 @@ struct ConversationDetailView: View {
                     .onSubmit {
                         sendMessage()
                     }
+                
+                // Image picker
+                ImagePickerButton(selectedImages: $selectedImages, maxImages: 5)
+                    .disabled(isSending)
                 
                 // Send button
                 Button {
@@ -543,8 +577,14 @@ struct ConversationDetailView: View {
         }
     }
     
+    private func removeImage(_ image: SelectedImage) {
+        selectedImages.removeAll { $0.id == image.id }
+    }
+    
     private var canSend: Bool {
-        !messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
+        let hasText = !messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasAttachments = !selectedImages.isEmpty
+        return (hasText || hasAttachments) && !isSending
     }
     
     private func loadMessages() {
@@ -621,24 +661,51 @@ struct ConversationDetailView: View {
     
     private func sendMessage() {
         let trimmedMessage = messageInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedMessage.isEmpty, !isSending else { return }
+        let hasText = !trimmedMessage.isEmpty
+        let hasImages = !selectedImages.isEmpty
+        
+        guard (hasText || hasImages), !isSending else { return }
         
         let userMessage = trimmedMessage
+        let imagesToSend = selectedImages
+        
+        // Clear input
         messageInput = ""
+        selectedImages = []
         isSending = true
         error = nil
         isInputFocused = false
+        
+        // Convert images to attachments
+        var attachments: [MessageAttachment] = []
+        for selectedImage in imagesToSend {
+            if let base64 = selectedImage.toBase64(),
+               let thumbnailData = selectedImage.thumbnail().jpegData(compressionQuality: 0.5)?.base64EncodedString() {
+                let attachment = MessageAttachment(
+                    id: UUID().uuidString,
+                    type: .image,
+                    filename: "image-\(Date().timeIntervalSince1970).jpg",
+                    mimeType: "image/jpeg",
+                    size: selectedImage.estimatedSize,
+                    data: base64,
+                    url: nil,
+                    thumbnailData: thumbnailData
+                )
+                attachments.append(attachment)
+            }
+        }
         
         // Add user message to UI immediately
         let newUserMessage = ConversationMessage(
             id: "temp-\(Date().timeIntervalSince1970)",
             type: "user",
-            text: userMessage,
+            text: hasText ? userMessage : nil,
             timestamp: Date().timeIntervalSince1970 * 1000,
             modelType: nil,
             codeBlocks: nil,
             selections: nil,
-            relevantFiles: nil
+            relevantFiles: nil,
+            attachments: attachments.isEmpty ? nil : attachments
         )
         messages.append(newUserMessage)
         
@@ -681,7 +748,8 @@ struct ConversationDetailView: View {
                 try await api.sendMessage(
                     conversationId: conversationId,
                     message: userMessage,
-                    workspaceId: workspaceId
+                    workspaceId: workspaceId,
+                    attachments: attachments
                 ) { [weak authManager] event in
                     // Only process if authManager still exists (view likely still active)
                     guard authManager != nil else { return }
@@ -851,6 +919,11 @@ struct MessageBubble: View {
                     // Tool calls (if any)
                     if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                         ToolCallsView(toolCalls: toolCalls)
+                    }
+                    
+                    // Attachments (if any)
+                    if let attachments = message.attachments, !attachments.isEmpty {
+                        AttachmentsView(attachments: attachments, isUserMessage: isUser)
                     }
                     
                     // Message content with markdown
@@ -1216,6 +1289,147 @@ struct ToolCallRow: View {
             return "{\(dict.count) keys}"
         case .null:
             return "null"
+        }
+    }
+}
+
+// MARK: - Attachments View
+
+struct AttachmentsView: View {
+    let attachments: [MessageAttachment]
+    let isUserMessage: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(attachments) { attachment in
+                if attachment.isImage {
+                    ImageAttachmentView(attachment: attachment, isUserMessage: isUserMessage)
+                } else {
+                    FileAttachmentView(attachment: attachment, isUserMessage: isUserMessage)
+                }
+            }
+        }
+    }
+}
+
+struct ImageAttachmentView: View {
+    let attachment: MessageAttachment
+    let isUserMessage: Bool
+    @State private var showFullScreen = false
+    
+    var body: some View {
+        Group {
+            if let base64Data = attachment.data,
+               let imageData = Data(base64Encoded: base64Data),
+               let uiImage = UIImage(data: imageData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 250, maxHeight: 250)
+                    .cornerRadius(12)
+                    .onTapGesture {
+                        showFullScreen = true
+                    }
+                    .sheet(isPresented: $showFullScreen) {
+                        FullScreenImageView(image: uiImage)
+                    }
+            } else if let thumbnailData = attachment.thumbnailData,
+                      let imageData = Data(base64Encoded: thumbnailData),
+                      let uiImage = UIImage(data: imageData) {
+                // Show thumbnail if full image not available
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 150, maxHeight: 150)
+                    .cornerRadius(8)
+                    .opacity(0.7)
+            }
+        }
+    }
+}
+
+struct FileAttachmentView: View {
+    let attachment: MessageAttachment
+    let isUserMessage: Bool
+    
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: iconName)
+                .font(.title2)
+                .foregroundColor(isUserMessage ? .white : .accentColor)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.displayName)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                
+                if let size = attachment.size {
+                    Text(formatFileSize(size))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding(12)
+        .background(isUserMessage ? Color.white.opacity(0.2) : Color(.tertiarySystemBackground))
+        .cornerRadius(8)
+    }
+    
+    private var iconName: String {
+        switch attachment.type {
+        case .image:
+            return "photo"
+        case .document:
+            return "doc"
+        case .file:
+            return "paperclip"
+        }
+    }
+    
+    private func formatFileSize(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+}
+
+struct FullScreenImageView: View {
+    let image: UIImage
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geometry in
+                ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: geometry.size.width * scale, height: geometry.size.height * scale)
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    let delta = value / lastScale
+                                    lastScale = value
+                                    scale = min(max(scale * delta, 1.0), 5.0)
+                                }
+                                .onEnded { _ in
+                                    lastScale = 1.0
+                                }
+                        )
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 }

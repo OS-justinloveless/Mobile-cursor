@@ -29,5 +29,9 @@
 		<key>UIImageName</key>
 		<string>LaunchIcon</string>
 	</dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Cursor Mobile needs access to your photos to attach images to chat messages.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Cursor Mobile needs access to your camera to take photos for chat messages.</string>
 </dict>
 </plist>

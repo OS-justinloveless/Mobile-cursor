@@ -383,11 +383,11 @@ router.post('/:conversationId/messages', async (req, res) => {
   console.log('\n=== NEW MESSAGE REQUEST ===');
   console.log('Timestamp:', new Date().toISOString());
   console.log('Conversation ID:', req.params.conversationId);
-  console.log('Request body:', JSON.stringify(req.body, null, 2));
+  console.log('Request body:', JSON.stringify({ ...req.body, attachments: req.body.attachments ? `${req.body.attachments.length} attachments` : 'none' }, null, 2));
   
   try {
     const { conversationId } = req.params;
-    const { message, workspaceId, allowReadOnly } = req.body;
+    const { message, workspaceId, allowReadOnly, attachments } = req.body;
     
     if (!message || message.trim() === '') {
       console.error('ERROR: Empty message');
@@ -442,11 +442,29 @@ router.post('/:conversationId/messages', async (req, res) => {
     // Save the user message to mobile store immediately
     const userMessageId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const userMessageTimestamp = Date.now();
+    
+    // Process attachments if present
+    let processedAttachments = null;
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      processedAttachments = attachments.map(att => ({
+        id: att.id || crypto.randomUUID(),
+        type: att.type || 'file',
+        filename: att.filename || 'attachment',
+        mimeType: att.mimeType || 'application/octet-stream',
+        size: att.size || 0,
+        data: att.data || null,
+        url: att.url || null,
+        thumbnailData: att.thumbnailData || null
+      }));
+      console.log(`Processing ${processedAttachments.length} attachment(s)`);
+    }
+    
     await mobileChatStore.addMessage(conversationId, {
       id: userMessageId,
       type: 'user',
       text: message.trim(),
-      timestamp: userMessageTimestamp
+      timestamp: userMessageTimestamp,
+      attachments: processedAttachments
     });
     console.log('User message saved to mobile store:', userMessageId);
     

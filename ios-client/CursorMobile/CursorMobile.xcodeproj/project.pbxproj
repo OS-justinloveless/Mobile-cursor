@@ -37,6 +37,7 @@
 		F000000000000018 /* ConversationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000018 /* ConversationsView.swift */; };
 		F000000000000019 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000019 /* SettingsView.swift */; };
 		F000000000000020 /* CommonViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000020 /* CommonViews.swift */; };
+		F000000000000038 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000038 /* ImagePicker.swift */; };
 		F000000000000021 /* ProjectFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000022 /* ProjectFilesView.swift */; };
 		F000000000000022 /* ProjectConversationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000023 /* ProjectConversationsView.swift */; };
 		F000000000000024 /* ProjectSelectionDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000024 /* ProjectSelectionDrawer.swift */; };
@@ -68,6 +69,7 @@
 		F100000000000018 /* ConversationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationsView.swift; sourceTree = "<group>"; };
 		F100000000000019 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F100000000000020 /* CommonViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonViews.swift; sourceTree = "<group>"; };
+		F100000000000038 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
 		F100000000000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F100000000000022 /* ProjectFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilesView.swift; sourceTree = "<group>"; };
 		F100000000000023 /* ProjectConversationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectConversationsView.swift; sourceTree = "<group>"; };
@@ -231,6 +233,7 @@
 			isa = PBXGroup;
 			children = (
 				F100000000000020 /* CommonViews.swift */,
+				F100000000000038 /* ImagePicker.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -337,6 +340,7 @@
 			F000000000000018 /* ConversationsView.swift in Sources */,
 			F000000000000019 /* SettingsView.swift in Sources */,
 			F000000000000020 /* CommonViews.swift in Sources */,
+			F000000000000038 /* ImagePicker.swift in Sources */,
 			F000000000000021 /* ProjectFilesView.swift in Sources */,
 			F000000000000022 /* ProjectConversationsView.swift in Sources */,
 			F000000000000024 /* ProjectSelectionDrawer.swift in Sources */,

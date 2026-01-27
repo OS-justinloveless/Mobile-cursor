@@ -94,7 +94,12 @@ export class CursorChatWriter {
       assistantSuggestedDiffs: [],
       gitDiffs: [],
       interpreterResults: [],
-      images: [],
+      images: message.attachments?.filter(a => a.type === 'image').map(att => ({
+        type: 'base64',
+        data: att.data,
+        mimeType: att.mimeType || 'image/jpeg',
+        name: att.filename
+      })) || [],
       attachedFolders: [],
       attachedFoldersNew: [],
       userResponsesToSuggestedCodeBlocks: [],

@@ -203,7 +203,8 @@ export class MobileChatStore {
         type: message.type || 'user',
         text: message.text || '',
         timestamp: message.timestamp || Date.now(),
-        toolCalls: message.toolCalls || null
+        toolCalls: message.toolCalls || null,
+        attachments: message.attachments || null
       });
     }
     

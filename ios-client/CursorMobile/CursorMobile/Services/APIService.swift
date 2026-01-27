@@ -362,6 +362,7 @@ class APIService {
         conversationId: String,
         message: String,
         workspaceId: String?,
+        attachments: [MessageAttachment]? = nil,
         onEvent: @escaping (MessageStreamEvent) -> Void
     ) async throws {
         guard let url = URL(string: "\(serverUrl)/api/conversations/\(conversationId)/messages") else {
@@ -380,6 +381,13 @@ class APIService {
         var bodyDict: [String: Any] = ["message": message]
         if let workspaceId = workspaceId {
             bodyDict["workspaceId"] = workspaceId
+        }
+        if let attachments = attachments, !attachments.isEmpty {
+            // Convert attachments to encodable format
+            let attachmentsData = try JSONEncoder().encode(attachments)
+            if let attachmentsArray = try? JSONSerialization.jsonObject(with: attachmentsData) {
+                bodyDict["attachments"] = attachmentsArray
+            }
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
         

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 struct Conversation: Codable, Identifiable, Hashable {
     let id: String
@@ -64,6 +65,7 @@ struct ConversationMessage: Codable, Identifiable {
     let selections: [String]?
     let relevantFiles: [String]?
     var toolCalls: [ToolCall]?
+    var attachments: [MessageAttachment]?
     
     var messageId: String {
         id ?? UUID().uuidString
@@ -94,6 +96,69 @@ struct ConversationMessage: Codable, Identifiable {
         let language: String?
         let content: String?
         let diffId: String?
+    }
+}
+
+struct MessageAttachment: Codable, Identifiable, Hashable {
+    let id: String
+    let type: AttachmentType
+    let filename: String
+    let mimeType: String
+    let size: Int?
+    let data: String? // Base64 encoded data
+    let url: String? // URL if stored on server
+    let thumbnailData: String? // Base64 encoded thumbnail for images
+    
+    enum AttachmentType: String, Codable {
+        case image
+        case document
+        case file
+    }
+    
+    var displayName: String {
+        filename
+    }
+    
+    var isImage: Bool {
+        type == .image
+    }
+}
+
+/// Model for a selected image
+struct SelectedImage: Identifiable, Equatable {
+    let id = UUID()
+    let image: UIImage
+    
+    /// Convert to base64 encoded string
+    func toBase64(compressionQuality: CGFloat = 0.7) -> String? {
+        guard let data = image.jpegData(compressionQuality: compressionQuality) else {
+            return nil
+        }
+        return data.base64EncodedString()
+    }
+    
+    /// Create thumbnail
+    func thumbnail(maxSize: CGFloat = 150) -> UIImage {
+        let size = image.size
+        let scale = min(maxSize / size.width, maxSize / size.height)
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+    
+    /// Get file size estimate in bytes
+    var estimatedSize: Int {
+        guard let data = image.jpegData(compressionQuality: 0.7) else {
+            return 0
+        }
+        return data.count
+    }
+    
+    static func == (lhs: SelectedImage, rhs: SelectedImage) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
