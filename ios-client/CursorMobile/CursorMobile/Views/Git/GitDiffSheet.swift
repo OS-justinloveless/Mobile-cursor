@@ -2,8 +2,11 @@ import SwiftUI
 
 struct GitDiffSheet: View {
     let project: Project
-    let file: GitFileChange
+    let file: GitFileChange?
     let staged: Bool
+    
+    /// For untracked (new) files, we only need the file path
+    let untrackedFilePath: String?
     
     @EnvironmentObject var authManager: AuthManager
     @Environment(\.dismiss) private var dismiss
@@ -16,6 +19,37 @@ struct GitDiffSheet: View {
     @State private var isTruncated = false
     @State private var loadTask: Task<Void, Never>?
     
+    /// Convenience initializer for tracked files
+    init(project: Project, file: GitFileChange, staged: Bool) {
+        self.project = project
+        self.file = file
+        self.staged = staged
+        self.untrackedFilePath = nil
+    }
+    
+    /// Initializer for untracked (new) files - shows all content as added
+    init(project: Project, untrackedFilePath: String) {
+        self.project = project
+        self.file = nil
+        self.staged = false
+        self.untrackedFilePath = untrackedFilePath
+    }
+    
+    /// The display file name
+    private var displayFileName: String {
+        if let file = file {
+            return file.path.components(separatedBy: "/").last ?? file.path
+        } else if let path = untrackedFilePath {
+            return path.components(separatedBy: "/").last ?? path
+        }
+        return "Unknown"
+    }
+    
+    /// Whether this is a new/untracked file
+    private var isNewFile: Bool {
+        untrackedFilePath != nil
+    }
+    
     private var api: APIService? {
         guard let serverUrl = authManager.serverUrl,
               let token = authManager.token else { return nil }
@@ -25,7 +59,7 @@ struct GitDiffSheet: View {
     var body: some View {
         NavigationStack {
             contentView
-                .navigationTitle(file.path.components(separatedBy: "/").last ?? file.path)
+                .navigationTitle(displayFileName)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -37,9 +71,9 @@ struct GitDiffSheet: View {
                     
                     ToolbarItem(placement: .principal) {
                         VStack(spacing: 0) {
-                            Text(file.path.components(separatedBy: "/").last ?? file.path)
+                            Text(displayFileName)
                                 .font(.headline)
-                            Text(staged ? "Staged" : "Unstaged")
+                            Text(isNewFile ? "New File" : (staged ? "Staged" : "Unstaged"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -51,7 +85,11 @@ struct GitDiffSheet: View {
             guard !hasStartedLoading else { return }
             hasStartedLoading = true
             loadTask = Task {
-                await loadDiff()
+                if isNewFile {
+                    await loadNewFileDiff()
+                } else {
+                    await loadDiff()
+                }
             }
         }
         .onDisappear {
@@ -164,7 +202,7 @@ struct GitDiffSheet: View {
     
     @MainActor
     private func loadDiff() async {
-        guard let api = api else { 
+        guard let api = api, let file = file else { 
             isLoading = false
             errorMessage = "Not connected to server"
             return 
@@ -199,9 +237,74 @@ struct GitDiffSheet: View {
             isLoading = false
         }
     }
+    
+    /// Loads an untracked (new) file and displays all lines as added
+    @MainActor
+    private func loadNewFileDiff() async {
+        guard let api = api, let filePath = untrackedFilePath else {
+            isLoading = false
+            errorMessage = "Not connected to server"
+            return
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            // Construct the full file path
+            let fullPath = "\(project.path)/\(filePath)"
+            let fileContent = try await api.readFile(path: fullPath)
+            
+            // Check if task was cancelled
+            guard !Task.isCancelled else { return }
+            
+            // Parse lines in background - all lines are "added" for new files
+            let content = fileContent.content
+            let parsedLines = await Task.detached(priority: .userInitiated) {
+                parseNewFileContent(content)
+            }.value
+            
+            // Check truncation for large files
+            if parsedLines.count > 2000 {
+                isTruncated = true
+                diffLines = Array(parsedLines.prefix(2000))
+            } else {
+                isTruncated = false
+                diffLines = parsedLines
+            }
+            
+            // Check if task was cancelled before updating UI
+            guard !Task.isCancelled else { return }
+            
+            isLoading = false
+        } catch {
+            guard !Task.isCancelled else { return }
+            errorMessage = error.localizedDescription
+            isLoading = false
+        }
+    }
 }
 
 // MARK: - Diff Parsing
+
+/// Parses content for a new (untracked) file - all lines are shown as added
+private func parseNewFileContent(_ content: String) -> [DiffLine] {
+    let lines = content.components(separatedBy: "\n")
+    var result: [DiffLine] = []
+    
+    for (index, line) in lines.enumerated() {
+        let lineNum = index + 1
+        result.append(DiffLine(
+            id: lineNum,
+            oldLineNumber: nil,
+            newLineNumber: lineNum,
+            content: line,
+            lineType: .added
+        ))
+    }
+    
+    return result
+}
 
 /// Parses diff content, skipping front matter and extracting actual file line numbers
 private func parseDiffContent(_ content: String) -> [DiffLine] {

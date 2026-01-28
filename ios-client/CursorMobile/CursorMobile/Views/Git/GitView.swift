@@ -153,7 +153,7 @@ struct GitView: View {
     @State private var selectedFileStaged = false
     @State private var showDiffSheet = false
     @State private var selectedUntrackedFilePath: String?
-    @State private var showFileViewerSheet = false
+    @State private var showUntrackedDiffSheet = false
     @State private var isPushing = false
     @State private var isPulling = false
     @State private var operationMessage: String?
@@ -331,9 +331,9 @@ struct GitView: View {
                 GitDiffSheet(project: project, file: file, staged: selectedFileStaged)
             }
         }
-        .sheet(isPresented: $showFileViewerSheet) {
+        .sheet(isPresented: $showUntrackedDiffSheet) {
             if let filePath = selectedUntrackedFilePath {
-                FileViewerSheet(filePath: filePath)
+                GitDiffSheet(project: project, untrackedFilePath: filePath)
             }
         }
         .alert("Git Operation", isPresented: .init(
@@ -661,14 +661,12 @@ struct GitView: View {
             }
             
             // File info - tappable for viewing
-            // For untracked files: shows file content
-            // For tracked files: shows diff
+            // For both untracked and tracked files: shows diff view
             Button {
                 if file.isUntracked {
-                    // For untracked (newly added) files, show the file viewer
-                    // Need to get the full path - combine project path with relative path
-                    selectedUntrackedFilePath = "\(project.path)/\(file.path)"
-                    showFileViewerSheet = true
+                    // For untracked (newly added) files, show as diff with all lines added
+                    selectedUntrackedFilePath = file.path
+                    showUntrackedDiffSheet = true
                 } else if let originalFile = status?.unstaged.first(where: { $0.path == file.path }) {
                     // For tracked files with changes, show the diff
                     selectedFile = originalFile
