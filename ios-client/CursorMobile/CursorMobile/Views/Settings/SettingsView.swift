@@ -186,6 +186,23 @@ struct SettingsView: View {
                 Text("Account")
             }
             
+            // Editor Section
+            Section {
+                NavigationLink {
+                    SyntaxSettingsView()
+                } label: {
+                    HStack {
+                        Label("Syntax Highlighting", systemImage: "paintbrush")
+                        Spacer()
+                        Text(SyntaxHighlightManager.shared.syntaxHighlightingEnabled ? "On" : "Off")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            } header: {
+                Text("Editor")
+            }
+            
             // Cache Section
             Section {
                 Button {

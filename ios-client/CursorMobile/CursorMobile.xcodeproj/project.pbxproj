@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		96E84BCC2F272E4800B612F2 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 96E84BCB2F272E4800B612F2 /* SwiftTerm */; };
+		B100000000000003 /* SyntaxHighlight in Frameworks */ = {isa = PBXBuildFile; productRef = B100000000000002 /* SyntaxHighlight */; };
 		96E84BCE2F272E6F00B612F2 /* Terminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96E84BCD2F272E6F00B612F2 /* Terminal.swift */; };
 		96E84BD82F272EE700B612F2 /* SwiftTermWrapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96E84BD42F272EE700B612F2 /* SwiftTermWrapper.swift */; };
 		96E84BD92F272EE700B612F2 /* TerminalListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96E84BD52F272EE700B612F2 /* TerminalListView.swift */; };
@@ -44,6 +45,11 @@
 		F000000000000021 /* ProjectFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000022 /* ProjectFilesView.swift */; };
 		F000000000000022 /* ProjectConversationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000023 /* ProjectConversationsView.swift */; };
 		F000000000000024 /* ProjectSelectionDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000024 /* ProjectSelectionDrawer.swift */; };
+		C000000000000001 /* SyntaxHighlightManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100000000000001 /* SyntaxHighlightManager.swift */; };
+		C000000000000002 /* HighlightedCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100000000000002 /* HighlightedCodeView.swift */; };
+		C000000000000003 /* SyntaxSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100000000000003 /* SyntaxSettingsView.swift */; };
+		C000000000000010 /* Grammars in Resources */ = {isa = PBXBuildFile; fileRef = C100000000000010 /* Grammars */; };
+		C000000000000011 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = C100000000000011 /* Themes */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -86,6 +92,11 @@
 		F100000000000027 /* GitCommitSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitCommitSheet.swift; sourceTree = "<group>"; };
 		F100000000000028 /* GitBranchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitBranchSheet.swift; sourceTree = "<group>"; };
 		F100000000000029 /* GitDiffSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiffSheet.swift; sourceTree = "<group>"; };
+		C100000000000001 /* SyntaxHighlightManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxHighlightManager.swift; sourceTree = "<group>"; };
+		C100000000000002 /* HighlightedCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightedCodeView.swift; sourceTree = "<group>"; };
+		C100000000000003 /* SyntaxSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxSettingsView.swift; sourceTree = "<group>"; };
+		C100000000000010 /* Grammars */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Grammars; sourceTree = "<group>"; };
+		C100000000000011 /* Themes */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Themes; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +105,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				96E84BCC2F272E4800B612F2 /* SwiftTerm in Frameworks */,
+				B100000000000003 /* SyntaxHighlight in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -146,6 +158,8 @@
 			isa = PBXGroup;
 			children = (
 				A200000000000002 /* xterm.html */,
+				C100000000000010 /* Grammars */,
+				C100000000000011 /* Themes */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -170,6 +184,7 @@
 				F100000000000010 /* APIService.swift */,
 				F100000000000011 /* WebSocketManager.swift */,
 				F100000000000040 /* CacheManager.swift */,
+				C100000000000001 /* SyntaxHighlightManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -227,6 +242,7 @@
 			children = (
 				F100000000000017 /* FileViewerSheet.swift */,
 				F100000000000039 /* FileComponents.swift */,
+				C100000000000002 /* HighlightedCodeView.swift */,
 			);
 			path = Files;
 			sourceTree = "<group>";
@@ -243,6 +259,7 @@
 			isa = PBXGroup;
 			children = (
 				F100000000000019 /* SettingsView.swift */,
+				C100000000000003 /* SyntaxSettingsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -310,6 +327,7 @@
 			mainGroup = F300000000000001;
 			packageReferences = (
 				96E84BCA2F272E4800B612F2 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				B100000000000001 /* XCRemoteSwiftPackageReference "SyntaxHighlight" */,
 			);
 			productRefGroup = F300000000000099 /* Products */;
 			projectDirPath = "";
@@ -327,6 +345,8 @@
 			files = (
 				F000000000000003 /* Assets.xcassets in Resources */,
 				A100000000000002 /* xterm.html in Resources */,
+				C000000000000010 /* Grammars in Resources */,
+				C000000000000011 /* Themes in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -371,6 +391,9 @@
 			F000000000000027 /* GitCommitSheet.swift in Sources */,
 			F000000000000028 /* GitBranchSheet.swift in Sources */,
 			F000000000000029 /* GitDiffSheet.swift in Sources */,
+			C000000000000001 /* SyntaxHighlightManager.swift in Sources */,
+			C000000000000002 /* HighlightedCodeView.swift in Sources */,
+			C000000000000003 /* SyntaxSettingsView.swift in Sources */,
 		);
 		runOnlyForDeploymentPostprocessing = 0;
 	};
@@ -594,6 +617,14 @@
 				minimumVersion = 1.5.0;
 			};
 		};
+		B100000000000001 /* XCRemoteSwiftPackageReference "SyntaxHighlight" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/maoyama/SyntaxHighlight";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -601,6 +632,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 96E84BCA2F272E4800B612F2 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
+		};
+		B100000000000002 /* SyntaxHighlight */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B100000000000001 /* XCRemoteSwiftPackageReference "SyntaxHighlight" */;
+			productName = SyntaxHighlight;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -1,6 +1,42 @@
 {
-  "originHash" : "4d9d9af82f23f3c708bdd502fed3939413b4f2a95a79ae568364cc92bca1527e",
+  "originHash" : "1c6c6c783117022441c6a3cbe9d71a148f628b891afc2b1206499f2825fe74d5",
   "pins" : [
+    {
+      "identity" : "dynamiccolor",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/yannickl/DynamicColor",
+      "state" : {
+        "revision" : "d9beca13ca85baa50ee29832d0db5129fba69630",
+        "version" : "5.0.1"
+      }
+    },
+    {
+      "identity" : "finejson",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/omochi/FineJSON",
+      "state" : {
+        "revision" : "05101709243cb66d80c92e645210a3b80cf4e17f",
+        "version" : "1.14.0"
+      }
+    },
+    {
+      "identity" : "onigmo-swift-build",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/maoyama/Onigmo-swift-build",
+      "state" : {
+        "revision" : "d0dd20ecbad3aa0de7083c3e522ef722ed738b8a",
+        "version" : "1.2.0"
+      }
+    },
+    {
+      "identity" : "richjsonparser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/omochi/RichJSONParser.git",
+      "state" : {
+        "revision" : "263e2ecfe88d0500fa99e4cbc8c948529d335534",
+        "version" : "3.0.0"
+      }
+    },
     {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
@@ -17,6 +53,24 @@
       "state" : {
         "revision" : "0b8d99bd19b694df44e1ccaa3891309719d34330",
         "version" : "1.5.1"
+      }
+    },
+    {
+      "identity" : "syntaxhighlight",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/maoyama/SyntaxHighlight",
+      "state" : {
+        "revision" : "dc20df1f3a2189e301e90daedfadd16b9be070db",
+        "version" : "0.2.0"
+      }
+    },
+    {
+      "identity" : "tmsyntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/maoyama/TMSyntax",
+      "state" : {
+        "revision" : "47fa35533c126d0b068004d5b67277c1ffcfb903",
+        "version" : "0.1.0"
       }
     }
   ],
