@@ -13,13 +13,22 @@ struct NewChatSheet: View {
     @State private var availableModels: [AIModel] = []
     @State private var isLoadingModels = true
     @State private var selectedModelId: String? = nil
-    @State private var selectedMode: ChatMode = .agent
+    @State private var selectedMode: ChatMode
     @State private var showOptions = false
     
     @FocusState private var isMessageFocused: Bool
     
     let project: Project
     let onChatCreated: (String, String, String?, ChatMode) -> Void  // (chatId, initialMessage, model, mode)
+    
+    init(project: Project, onChatCreated: @escaping (String, String, String?, ChatMode) -> Void) {
+        self.project = project
+        self.onChatCreated = onChatCreated
+        // Initialize with defaults from ChatSettingsManager
+        let settings = ChatSettingsManager.shared
+        _selectedMode = State(initialValue: settings.defaultMode)
+        _selectedModelId = State(initialValue: settings.defaultModelId)
+    }
     
     /// Selected model object based on selectedModelId
     private var selectedModel: AIModel? {
@@ -207,11 +216,16 @@ struct NewChatSheet: View {
                 let models = try await api.getAvailableModels()
                 await MainActor.run {
                     availableModels = models
-                    // Set initial selection to current or default model
-                    if let current = models.first(where: { $0.isCurrent }) {
-                        selectedModelId = current.id
-                    } else if let defaultModel = models.first(where: { $0.isDefault }) {
-                        selectedModelId = defaultModel.id
+                    // Priority for initial model selection:
+                    // 1. User's saved default from settings (already set in init)
+                    // 2. Current model from server
+                    // 3. Server's default model
+                    if selectedModelId == nil {
+                        if let current = models.first(where: { $0.isCurrent }) {
+                            selectedModelId = current.id
+                        } else if let defaultModel = models.first(where: { $0.isDefault }) {
+                            selectedModelId = defaultModel.id
+                        }
                     }
                     isLoadingModels = false
                 }

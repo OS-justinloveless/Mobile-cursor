@@ -63,6 +63,7 @@ struct SettingsView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var webSocketManager: WebSocketManager
     @EnvironmentObject var themeManager: ThemeManager
+    @StateObject private var chatSettings = ChatSettingsManager.shared
     
     @State private var systemInfo: SystemInfo?
     @State private var networkInfo: [NetworkInterface] = []
@@ -267,6 +268,128 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Editor")
+            }
+            
+            // Chat Defaults Section
+            Section {
+                // Default Model picker
+                HStack {
+                    Label("Default Model", systemImage: "cpu")
+                    Spacer()
+                    if chatSettings.isLoadingModels {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Menu {
+                            Button {
+                                chatSettings.defaultModelId = nil
+                            } label: {
+                                HStack {
+                                    Text("System Default")
+                                    if chatSettings.defaultModelId == nil {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                            
+                            Divider()
+                            
+                            ForEach(chatSettings.cachedModels) { model in
+                                Button {
+                                    chatSettings.defaultModelId = model.id
+                                } label: {
+                                    HStack {
+                                        Text(model.name)
+                                        if chatSettings.defaultModelId == model.id {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(chatSettings.defaultModelDisplayName)
+                                    .font(.subheadline)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                            }
+                            .foregroundColor(.primary)
+                        }
+                    }
+                }
+                
+                // Default Mode picker
+                HStack {
+                    Label("Default Mode", systemImage: "person.fill.questionmark")
+                    Spacer()
+                    Menu {
+                        ForEach(ChatMode.allCases) { mode in
+                            Button {
+                                chatSettings.defaultMode = mode
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(mode.displayName)
+                                        Text(mode.description)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    if chatSettings.defaultMode == mode {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(chatSettings.defaultMode.displayName)
+                                .font(.subheadline)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundColor(.primary)
+                    }
+                }
+                
+                // Permission Mode picker
+                HStack {
+                    Label("Permissions", systemImage: "shield")
+                    Spacer()
+                    Menu {
+                        ForEach(PermissionMode.allCases) { permission in
+                            Button {
+                                chatSettings.defaultPermissionMode = permission
+                            } label: {
+                                HStack {
+                                    Image(systemName: permission.icon)
+                                    VStack(alignment: .leading) {
+                                        Text(permission.displayName)
+                                        Text(permission.description)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    if chatSettings.defaultPermissionMode == permission {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: chatSettings.defaultPermissionMode.icon)
+                                .font(.caption)
+                            Text(chatSettings.defaultPermissionMode.displayName)
+                                .font(.subheadline)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundColor(.primary)
+                    }
+                }
+            } header: {
+                Text("Chat Defaults")
+            } footer: {
+                Text("These settings apply to all new chats. You can override them when creating a chat.")
             }
             
             // Appearance / Theme Section
@@ -618,6 +741,9 @@ struct SettingsView: View {
             } catch {
                 self.error = error.localizedDescription
             }
+            
+            // Also load models for chat settings
+            await chatSettings.fetchModels(using: api)
             
             isLoading = false
         }
