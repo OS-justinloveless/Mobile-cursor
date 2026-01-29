@@ -8,6 +8,9 @@ struct MainTabView: View {
     @State private var selectedProject: Project?
     @State private var isDrawerOpen = false
     
+    // Track when terminal view is active (to hide tab bar)
+    @State private var isTerminalViewActive = false
+    
     // New chat state
     @State private var isCreatingChat = false
     @State private var newChatId: String?
@@ -92,6 +95,12 @@ struct MainTabView: View {
                 webSocketManager.watchPath(project.path)
             }
         }
+        .onChange(of: selectedTab) { _, newTab in
+            // Reset terminal view active state when switching away from terminals tab
+            if newTab != 1 {
+                isTerminalViewActive = false
+            }
+        }
     }
     
     @ViewBuilder
@@ -123,15 +132,17 @@ struct MainTabView: View {
                 }
             }
             
-            // Floating tab bar and FAB overlay
-            HStack(alignment: .bottom, spacing: 12) {
-                FloatingTabBar(selectedTab: $selectedTab)
-                FloatingActionButton {
-                    showNewChatSheet = true
+            // Floating tab bar and FAB overlay - hide when in terminal view
+            if !isTerminalViewActive {
+                HStack(alignment: .bottom, spacing: 12) {
+                    FloatingTabBar(selectedTab: $selectedTab)
+                    FloatingActionButton {
+                        showNewChatSheet = true
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
         }
         .sheet(isPresented: $showNewChatSheet) {
             NewChatSheet(project: project) { chatId, initialMessage, modelId, mode in
@@ -163,14 +174,17 @@ struct MainTabView: View {
     
     private func terminalsTab(project: Project) -> some View {
         NavigationStack {
-            TerminalListView(project: project)
+            TerminalListView(project: project, isTerminalViewActive: $isTerminalViewActive)
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) {
                         drawerToggleButton
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
-                    Color.clear.frame(height: 80)
+                    // Only add bottom spacing when tab bar is visible
+                    if !isTerminalViewActive {
+                        Color.clear.frame(height: 80)
+                    }
                 }
         }
     }

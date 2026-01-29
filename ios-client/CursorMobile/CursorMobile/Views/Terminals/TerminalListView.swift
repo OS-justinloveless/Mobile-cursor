@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TerminalListView: View {
     let project: Project
+    @Binding var isTerminalViewActive: Bool
     
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var webSocketManager: WebSocketManager
@@ -11,6 +12,11 @@ struct TerminalListView: View {
     @State private var selectedTerminal: Terminal?
     @State private var showInfoSheet = false
     @State private var isCreatingTerminal = false
+    
+    init(project: Project, isTerminalViewActive: Binding<Bool> = .constant(false)) {
+        self.project = project
+        self._isTerminalViewActive = isTerminalViewActive
+    }
     
     // Separate terminals by source
     private var ptyTerminals: [Terminal] {
@@ -83,6 +89,10 @@ struct TerminalListView: View {
             isLoading = true
             error = nil
             Task { await loadTerminals() }
+        }
+        .onChange(of: selectedTerminal) { _, newValue in
+            // Update tab bar visibility when terminal selection changes
+            isTerminalViewActive = newValue != nil
         }
     }
     
