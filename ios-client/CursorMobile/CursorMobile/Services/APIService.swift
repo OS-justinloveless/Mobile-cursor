@@ -341,6 +341,76 @@ class APIService {
         }
     }
     
+    // MARK: - Suggestions
+    
+    /// Get autocomplete suggestions for @ and / triggers
+    func getSuggestions(projectId: String, type: String? = nil, query: String? = nil) async throws -> [Suggestion] {
+        var queryItems: [URLQueryItem] = []
+        if let type = type {
+            queryItems.append(URLQueryItem(name: "type", value: type))
+        }
+        if let query = query, !query.isEmpty {
+            queryItems.append(URLQueryItem(name: "query", value: query))
+        }
+        
+        let data = try await makeRequest(
+            endpoint: "/api/suggestions/\(projectId)",
+            queryItems: queryItems.isEmpty ? nil : queryItems
+        )
+        
+        do {
+            let response = try decoder.decode(SuggestionsResponse.self, from: data)
+            return response.suggestions
+        } catch {
+            print("DEBUG [getSuggestions] Decoding failed: \(error)")
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Get only rules for a project
+    func getProjectRules(projectId: String) async throws -> [Suggestion] {
+        let data = try await makeRequest(endpoint: "/api/suggestions/\(projectId)/rules")
+        do {
+            let response = try decoder.decode(SuggestionsResponse.self, from: data)
+            return response.suggestions
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Get agents for a project (project + user level)
+    func getAgents(projectId: String) async throws -> [Suggestion] {
+        let data = try await makeRequest(endpoint: "/api/suggestions/\(projectId)/agents")
+        do {
+            let response = try decoder.decode(SuggestionsResponse.self, from: data)
+            return response.suggestions
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Get slash commands for a project
+    func getCommands(projectId: String) async throws -> [Suggestion] {
+        let data = try await makeRequest(endpoint: "/api/suggestions/\(projectId)/commands")
+        do {
+            let response = try decoder.decode(SuggestionsResponse.self, from: data)
+            return response.suggestions
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Get user skills
+    func getSkills() async throws -> [Suggestion] {
+        let data = try await makeRequest(endpoint: "/api/suggestions/skills")
+        do {
+            let response = try decoder.decode(SuggestionsResponse.self, from: data)
+            return response.suggestions
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
     // MARK: - Files
     
     func listDirectory(path: String) async throws -> [FileItem] {

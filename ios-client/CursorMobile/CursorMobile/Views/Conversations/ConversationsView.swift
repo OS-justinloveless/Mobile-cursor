@@ -248,6 +248,15 @@ struct ConversationDetailView: View {
     @FocusState private var isInputFocused: Bool
     @State private var selectedImages: [SelectedImage] = []
     
+    // Suggestion state for @ and / triggers
+    @State private var triggerState: TriggerType? = nil
+    @State private var triggerQuery: String = ""
+    @State private var triggerStartPosition: Int = 0
+    @State private var suggestions: [Suggestion] = []
+    @State private var isLoadingSuggestions = false
+    @State private var suggestionsCache: [Suggestion] = []
+    @State private var lastSuggestionsFetch: Date? = nil
+    
     var body: some View {
         VStack(spacing: 0) {
             // Read-only banner
@@ -291,6 +300,7 @@ struct ConversationDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             loadMessages()
+            prefetchSuggestions()
         }
         .navigationDestination(item: $forkedConversation) { forkedConv in
             ConversationDetailView(conversation: forkedConv)
@@ -531,6 +541,24 @@ struct ConversationDetailView: View {
     
     private var messageInputView: some View {
         VStack(spacing: 0) {
+            // Suggestion overlay (appears above input when @ or / is typed)
+            if triggerState != nil {
+                SuggestionOverlay(
+                    suggestions: suggestionsCache,
+                    query: triggerQuery,
+                    triggerType: triggerState ?? .at,
+                    onSelect: { suggestion in
+                        insertSuggestion(suggestion)
+                    },
+                    onDismiss: {
+                        dismissSuggestions()
+                    }
+                )
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            
             Divider()
             
             // Image attachments preview
@@ -576,6 +604,9 @@ struct ConversationDetailView: View {
                     .onSubmit {
                         sendMessage()
                     }
+                    .onChange(of: messageInput) { _, newValue in
+                        detectTrigger(in: newValue)
+                    }
                 
                 // Image picker
                 ImagePickerButton(selectedImages: $selectedImages, maxImages: 5)
@@ -593,8 +624,10 @@ struct ConversationDetailView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .padding(.bottom, 80) // Account for floating tab bar
             .background(Color(.systemBackground))
         }
+        .animation(.easeInOut(duration: 0.2), value: triggerState != nil)
     }
     
     private func removeImage(_ image: SelectedImage) {
@@ -605,6 +638,146 @@ struct ConversationDetailView: View {
         let hasText = !messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !selectedImages.isEmpty
         return (hasText || hasAttachments) && !isSending
+    }
+    
+    // MARK: - Suggestion Handling
+    
+    /// Detect @ or / trigger in the input text
+    private func detectTrigger(in text: String) {
+        // Find the last @ or / that could be a trigger
+        // A trigger is valid if:
+        // 1. It's at the start of the text, OR
+        // 2. It's preceded by a space or newline
+        // 3. It's not followed by a space (meaning user is still typing)
+        
+        var lastTriggerIndex: Int? = nil
+        var lastTriggerType: TriggerType? = nil
+        
+        for (index, char) in text.enumerated() {
+            if char == "@" || char == "/" {
+                // Check if this could be a trigger
+                let isAtStart = index == 0
+                let hasPrecedingSpace = index > 0 && {
+                    let prevIndex = text.index(text.startIndex, offsetBy: index - 1)
+                    let prevChar = text[prevIndex]
+                    return prevChar == " " || prevChar == "\n"
+                }()
+                
+                if isAtStart || hasPrecedingSpace {
+                    lastTriggerIndex = index
+                    lastTriggerType = char == "@" ? .at : .slash
+                }
+            }
+        }
+        
+        // Check if the trigger is still active (no space after the trigger + query)
+        if let triggerIndex = lastTriggerIndex, let triggerType = lastTriggerType {
+            let afterTrigger = String(text.dropFirst(triggerIndex + 1))
+            
+            // If there's a space in the query, the trigger is complete - dismiss
+            if afterTrigger.contains(" ") || afterTrigger.contains("\n") {
+                dismissSuggestions()
+                return
+            }
+            
+            // Update trigger state
+            withAnimation(.easeInOut(duration: 0.15)) {
+                triggerState = triggerType
+                triggerQuery = afterTrigger
+                triggerStartPosition = triggerIndex
+            }
+            
+            // Fetch suggestions if we don't have them cached recently
+            fetchSuggestionsIfNeeded()
+        } else {
+            // No active trigger
+            if triggerState != nil {
+                dismissSuggestions()
+            }
+        }
+    }
+    
+    /// Dismiss the suggestions overlay
+    private func dismissSuggestions() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            triggerState = nil
+            triggerQuery = ""
+            triggerStartPosition = 0
+        }
+    }
+    
+    /// Insert a selected suggestion into the message input
+    private func insertSuggestion(_ suggestion: Suggestion) {
+        // Replace the trigger + query with the suggestion
+        let beforeTrigger = String(messageInput.prefix(triggerStartPosition))
+        let afterQuery = "" // We replace everything after the trigger
+        
+        // Build the new text
+        let insertText = suggestion.insertText
+        messageInput = beforeTrigger + insertText + afterQuery
+        
+        // Dismiss suggestions
+        dismissSuggestions()
+    }
+    
+    /// Fetch suggestions from the server if not cached
+    private func fetchSuggestionsIfNeeded() {
+        // Check if we have recent cached suggestions (within 30 seconds)
+        if let lastFetch = lastSuggestionsFetch,
+           Date().timeIntervalSince(lastFetch) < 30,
+           !suggestionsCache.isEmpty {
+            return
+        }
+        
+        // Don't fetch if already loading
+        guard !isLoadingSuggestions else { return }
+        
+        isLoadingSuggestions = true
+        
+        Task {
+            guard let api = authManager.createAPIService() else {
+                await MainActor.run {
+                    isLoadingSuggestions = false
+                }
+                return
+            }
+            
+            do {
+                // Use workspaceId as the project ID for fetching suggestions
+                let projectId = conversation.workspaceId
+                let fetchedSuggestions = try await api.getSuggestions(projectId: projectId)
+                
+                await MainActor.run {
+                    suggestionsCache = fetchedSuggestions
+                    lastSuggestionsFetch = Date()
+                    isLoadingSuggestions = false
+                }
+            } catch {
+                print("Error fetching suggestions: \(error)")
+                await MainActor.run {
+                    isLoadingSuggestions = false
+                }
+            }
+        }
+    }
+    
+    /// Prefetch suggestions when the view appears
+    private func prefetchSuggestions() {
+        Task {
+            guard let api = authManager.createAPIService() else { return }
+            
+            do {
+                let projectId = conversation.workspaceId
+                let fetchedSuggestions = try await api.getSuggestions(projectId: projectId)
+                
+                await MainActor.run {
+                    suggestionsCache = fetchedSuggestions
+                    lastSuggestionsFetch = Date()
+                }
+            } catch {
+                print("Error prefetching suggestions: \(error)")
+            }
+        }
     }
     
     private func loadMessages() {

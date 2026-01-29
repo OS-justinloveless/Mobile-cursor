@@ -4,6 +4,7 @@ import { conversationRoutes } from './conversations.js';
 import { systemRoutes } from './system.js';
 import { terminalRoutes } from './terminals.js';
 import { gitRoutes } from './git.js';
+import { suggestionsRoutes } from './suggestions.js';
 
 export function setupRoutes(app) {
   app.use('/api/projects', projectRoutes);
@@ -12,6 +13,7 @@ export function setupRoutes(app) {
   app.use('/api/system', systemRoutes);
   app.use('/api/terminals', terminalRoutes);
   app.use('/api/git', gitRoutes);
+  app.use('/api/suggestions', suggestionsRoutes);
   
   // Health check (no auth required)
   app.get('/health', (req, res) => {
