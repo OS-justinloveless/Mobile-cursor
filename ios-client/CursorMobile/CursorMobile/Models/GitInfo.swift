@@ -10,6 +10,7 @@ struct GitStatus: Codable {
     let staged: [GitFileChange]
     let unstaged: [GitFileChange]
     let untracked: [String]
+    let lastCommitTimestamp: Int?  // Unix timestamp in milliseconds of the last commit
     
     /// Whether there are any changes (staged, unstaged, or untracked)
     var hasChanges: Bool {
@@ -19,6 +20,26 @@ struct GitStatus: Codable {
     /// Total number of changed files
     var totalChanges: Int {
         staged.count + unstaged.count + untracked.count
+    }
+    
+    /// Date of the last commit
+    var lastCommitDate: Date? {
+        guard let timestamp = lastCommitTimestamp else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000)
+    }
+    
+    /// Whether the repo needs to push or pull (has commits ahead or behind)
+    var needsPushPull: Bool {
+        ahead > 0 || behind > 0
+    }
+    
+    /// Get all file paths (staged, unstaged, and untracked) for searching
+    var allFilePaths: [String] {
+        var paths: [String] = []
+        paths.append(contentsOf: staged.map { $0.path })
+        paths.append(contentsOf: unstaged.map { $0.path })
+        paths.append(contentsOf: untracked)
+        return paths
     }
 }
 
@@ -161,6 +182,61 @@ struct GitRepositoriesResponse: Codable {
     let repositories: [GitRepository]
 }
 
+/// A wrapper that combines a GitRepository with its status for display purposes
+/// Used for filtering, sorting, and searching in the Git view
+struct GitRepositoryWithStatus: Identifiable {
+    let repository: GitRepository
+    var status: GitStatus?
+    
+    var id: String { repository.id }
+    
+    /// Total number of changed files
+    var totalChanges: Int { status?.totalChanges ?? 0 }
+    
+    /// Whether there are any changes (staged, unstaged, or untracked)
+    var hasChanges: Bool { status?.hasChanges ?? false }
+    
+    /// Whether the repo needs to push or pull
+    var needsPushPull: Bool { status?.needsPushPull ?? false }
+    
+    /// Date of the last commit for chronological sorting
+    var lastCommitDate: Date? { status?.lastCommitDate }
+    
+    /// Check if the repository matches a search query
+    /// Searches repo name, file paths in staged/unstaged/untracked
+    func matchesSearch(_ query: String) -> Bool {
+        guard !query.isEmpty else { return true }
+        
+        let lowercasedQuery = query.lowercased()
+        
+        // Search repo name
+        if repository.name.lowercased().contains(lowercasedQuery) {
+            return true
+        }
+        
+        // Search repo path
+        if repository.path.lowercased().contains(lowercasedQuery) {
+            return true
+        }
+        
+        // Search file paths in status
+        if let status = status {
+            for filePath in status.allFilePaths {
+                if filePath.lowercased().contains(lowercasedQuery) {
+                    return true
+                }
+            }
+        }
+        
+        return false
+    }
+    
+    /// Check if the repository path matches a glob pattern for exclusion
+    func matchesGlobPattern(_ pattern: String) -> Bool {
+        return repository.path.matchesGlob(pattern) || repository.name.matchesGlob(pattern)
+    }
+}
+
 // MARK: - API Request Types
 
 struct GitStageRequest: Codable {
@@ -205,4 +281,57 @@ struct GenerateCommitMessageResponse: Codable {
     let message: String
     let stagedFiles: Int?
     let truncated: Bool?
+}
+
+// MARK: - Glob Pattern Matching
+
+extension String {
+    /// Check if the string matches a simple glob pattern
+    /// Supports * (any characters) and ** (any path segments)
+    func matchesGlob(_ pattern: String) -> Bool {
+        // Convert glob pattern to regex
+        var regexPattern = "^"
+        var i = pattern.startIndex
+        
+        while i < pattern.endIndex {
+            let char = pattern[i]
+            
+            if char == "*" {
+                // Check for **
+                let nextIndex = pattern.index(after: i)
+                if nextIndex < pattern.endIndex && pattern[nextIndex] == "*" {
+                    // ** matches any path segments
+                    regexPattern += ".*"
+                    i = pattern.index(after: nextIndex)
+                    continue
+                } else {
+                    // * matches any characters except /
+                    regexPattern += "[^/]*"
+                }
+            } else if char == "?" {
+                // ? matches any single character
+                regexPattern += "."
+            } else if char == "/" {
+                regexPattern += "/"
+            } else if "[]().+^${}|\\".contains(char) {
+                // Escape special regex characters
+                regexPattern += "\\\(char)"
+            } else {
+                regexPattern += String(char)
+            }
+            
+            i = pattern.index(after: i)
+        }
+        
+        regexPattern += "$"
+        
+        do {
+            let regex = try NSRegularExpression(pattern: regexPattern, options: .caseInsensitive)
+            let range = NSRange(self.startIndex..., in: self)
+            return regex.firstMatch(in: self, options: [], range: range) != nil
+        } catch {
+            // If regex fails, fall back to simple contains check
+            return self.lowercased().contains(pattern.lowercased().replacingOccurrences(of: "*", with: ""))
+        }
+    }
 }

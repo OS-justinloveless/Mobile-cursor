@@ -177,13 +177,27 @@ export class GitManager {
       }
     }
 
+    // Get last commit timestamp for chronological sorting
+    let lastCommitTimestamp = null;
+    try {
+      const { stdout: logOutput } = await this.execGit(projectPath, 
+        ['log', '-1', '--format=%at'], { timeout: 5000 });
+      const timestamp = parseInt(logOutput.trim(), 10);
+      if (!isNaN(timestamp)) {
+        lastCommitTimestamp = timestamp * 1000; // Convert to milliseconds
+      }
+    } catch {
+      // Ignore errors - repo might have no commits
+    }
+
     return {
       branch,
       ahead,
       behind,
       staged,
       unstaged,
-      untracked
+      untracked,
+      lastCommitTimestamp
     };
   }
 

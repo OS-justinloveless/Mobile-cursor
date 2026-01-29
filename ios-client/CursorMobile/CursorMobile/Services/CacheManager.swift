@@ -190,6 +190,46 @@ class CacheManager {
     func clearGitRepositories(projectId: String) {
         remove(forKey: gitRepositoriesKey(projectId: projectId))
     }
+    
+    // MARK: - Git Filter Settings (User Preferences)
+    
+    /// Key for git filter settings (stored in UserDefaults for persistence across cache clears)
+    private var gitFilterSettingsKey: String { "git_filter_settings" }
+    
+    /// Save git filter settings to UserDefaults
+    /// These are user preferences, not cache data, so they persist indefinitely
+    func saveGitFilterSettings(_ settings: GitFilterSettings) {
+        do {
+            let encoded = try encoder.encode(settings)
+            UserDefaults.standard.set(encoded, forKey: gitFilterSettingsKey)
+            print("[CacheManager] Saved git filter settings")
+        } catch {
+            print("[CacheManager] Failed to save git filter settings: \(error)")
+        }
+    }
+    
+    /// Load git filter settings from UserDefaults
+    func loadGitFilterSettings() -> GitFilterSettings? {
+        guard let data = UserDefaults.standard.data(forKey: gitFilterSettingsKey) else {
+            print("[CacheManager] No git filter settings found")
+            return nil
+        }
+        
+        do {
+            let settings = try decoder.decode(GitFilterSettings.self, from: data)
+            print("[CacheManager] Loaded git filter settings")
+            return settings
+        } catch {
+            print("[CacheManager] Failed to load git filter settings: \(error)")
+            return nil
+        }
+    }
+    
+    /// Clear git filter settings (reset to defaults)
+    func clearGitFilterSettings() {
+        UserDefaults.standard.removeObject(forKey: gitFilterSettingsKey)
+        print("[CacheManager] Cleared git filter settings")
+    }
 }
 
 // MARK: - Supporting Types
