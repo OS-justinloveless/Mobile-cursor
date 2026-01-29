@@ -133,6 +133,14 @@ struct MainTabView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
         }
+        .sheet(isPresented: $showNewChatSheet) {
+            NewChatSheet(project: project) { chatId, initialMessage, modelId, mode in
+                newChatModelId = modelId
+                newChatMode = mode
+                selectedTab = 3  // Switch to chat tab
+                newChatId = chatId
+            }
+        }
     }
     
     // MARK: - Tab Views
@@ -213,14 +221,6 @@ struct MainTabView: View {
                         initialModelId: newChatModelId,
                         initialMode: newChatMode
                     )
-                }
-                .sheet(isPresented: $showNewChatSheet) {
-                    NewChatSheet(project: project) { chatId, initialMessage, modelId, mode in
-                        newChatModelId = modelId
-                        newChatMode = mode
-                        selectedTab = 3  // Switch to chat tab
-                        newChatId = chatId
-                    }
                 }
         }
     }
