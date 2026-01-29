@@ -14,6 +14,7 @@ struct FileViewerSheet: View {
     @State private var isSaving = false
     @State private var showSaveSuccess = false
     @State private var fileInfo: FileContent?
+    @State private var showMarkdownPreview = true
     
     var hasChanges: Bool {
         content != originalContent
@@ -21,6 +22,10 @@ struct FileViewerSheet: View {
     
     var fileName: String {
         (filePath as NSString).lastPathComponent
+    }
+    
+    var isMarkdownFile: Bool {
+        fileInfo?.language == "markdown" || fileName.lowercased().hasSuffix(".md")
     }
     
     var body: some View {
@@ -70,10 +75,25 @@ struct FileViewerSheet: View {
                         }
                         .disabled(!hasChanges || isSaving)
                     } else {
-                        Button {
-                            isEditing = true
-                        } label: {
-                            Image(systemName: "pencil")
+                        HStack(spacing: 16) {
+                            // Preview/Source toggle for markdown files
+                            if isMarkdownFile {
+                                Button {
+                                    showMarkdownPreview.toggle()
+                                } label: {
+                                    Image(systemName: showMarkdownPreview ? "doc.text" : "eye")
+                                }
+                                .help(showMarkdownPreview ? "Show Source" : "Show Preview")
+                            }
+                            
+                            // Edit button
+                            Button {
+                                isEditing = true
+                                // When editing, always show source
+                                showMarkdownPreview = false
+                            } label: {
+                                Image(systemName: "pencil")
+                            }
                         }
                     }
                 }
@@ -116,6 +136,8 @@ struct FileViewerSheet: View {
                     .font(.system(.body, design: .monospaced))
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
+            } else if isMarkdownFile && showMarkdownPreview {
+                MarkdownPreviewView(content: content)
             } else {
                 ScrollView {
                     HighlightedCodeView(content: content, language: fileInfo?.language ?? "plaintext")
@@ -162,6 +184,10 @@ struct FileViewerSheet: View {
                 _ = try await api.writeFile(path: filePath, content: content)
                 originalContent = content
                 isEditing = false
+                // Restore preview mode for markdown files after saving
+                if isMarkdownFile {
+                    showMarkdownPreview = true
+                }
                 showSaveSuccess = true
             } catch {
                 self.error = error.localizedDescription
