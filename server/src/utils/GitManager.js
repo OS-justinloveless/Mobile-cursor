@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
+import { readdir, stat } from 'fs/promises';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +13,33 @@ const execFileAsync = promisify(execFile);
 export class GitManager {
   constructor() {
     this.gitPath = 'git';
+  }
+
+  /**
+   * Unquote a git path that may be quoted with double quotes
+   * Git quotes paths containing spaces or special characters
+   * @param {string} path - The potentially quoted path
+   * @returns {string} - The unquoted path
+   */
+  unquotePath(path) {
+    if (!path) return path;
+    
+    // Check if the path is quoted (starts and ends with double quotes)
+    if (path.startsWith('"') && path.endsWith('"')) {
+      // Remove the surrounding quotes
+      let unquoted = path.slice(1, -1);
+      
+      // Unescape common escape sequences
+      unquoted = unquoted
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+      
+      return unquoted;
+    }
+    
+    return path;
   }
 
   /**
@@ -98,15 +126,18 @@ export class GitManager {
 
       const indexStatus = line[0];
       const workTreeStatus = line[1];
-      const filePath = line.substring(3).trim();
+      let filePath = line.substring(3).trim();
+      
+      // Unquote the path (git quotes paths with spaces/special chars)
+      filePath = this.unquotePath(filePath);
 
-      // Handle renames (format: "R  old -> new")
+      // Handle renames (format: "R  old -> new" or "old" -> "new" if quoted)
       let actualPath = filePath;
       let oldPath = null;
       if (filePath.includes(' -> ')) {
         const parts = filePath.split(' -> ');
-        oldPath = parts[0];
-        actualPath = parts[1];
+        oldPath = this.unquotePath(parts[0]);
+        actualPath = this.unquotePath(parts[1]);
       }
 
       // Determine status
@@ -146,13 +177,27 @@ export class GitManager {
       }
     }
 
+    // Get last commit timestamp for chronological sorting
+    let lastCommitTimestamp = null;
+    try {
+      const { stdout: logOutput } = await this.execGit(projectPath, 
+        ['log', '-1', '--format=%at'], { timeout: 5000 });
+      const timestamp = parseInt(logOutput.trim(), 10);
+      if (!isNaN(timestamp)) {
+        lastCommitTimestamp = timestamp * 1000; // Convert to milliseconds
+      }
+    } catch {
+      // Ignore errors - repo might have no commits
+    }
+
     return {
       branch,
       ahead,
       behind,
       staged,
       unstaged,
-      untracked
+      untracked,
+      lastCommitTimestamp
     };
   }
 
@@ -447,5 +492,122 @@ export class GitManager {
   async fetch(projectPath, remote = 'origin') {
     await this.execGit(projectPath, ['fetch', remote]);
     return { success: true };
+  }
+
+  /**
+   * Delete untracked files (undo adding new files)
+   * @param {string} projectPath - Project directory
+   * @param {string[]} files - Files to delete
+   */
+  async cleanFiles(projectPath, files) {
+    if (!files || files.length === 0) {
+      throw new Error('No files specified to clean');
+    }
+    
+    // Use git clean to remove untracked files
+    // -f = force (required), --  = path separator
+    // We clean each file individually for better control
+    for (const file of files) {
+      await this.execGit(projectPath, ['clean', '-f', '--', file]);
+    }
+    
+    return { success: true };
+  }
+
+  /**
+   * Scan a project directory for all git repositories (including sub-repos)
+   * @param {string} projectPath - Root project directory to scan
+   * @param {object} options - Scan options
+   * @param {number} options.maxDepth - Maximum directory depth to scan (default: 5)
+   * @param {string[]} options.excludeDirs - Directories to exclude (default: node_modules, vendor, Pods, .git)
+   * @returns {Promise<Array<{path: string, name: string}>>} - Array of repository info
+   */
+  async scanForRepositories(projectPath, options = {}) {
+    const maxDepth = options.maxDepth || 5;
+    const excludeDirs = new Set(options.excludeDirs || [
+      'node_modules',
+      'vendor',
+      'Pods',
+      '.git',
+      'build',
+      'dist',
+      '.build',
+      'DerivedData'
+    ]);
+
+    const repositories = [];
+
+    // Check if the root is a git repo
+    const rootGitPath = path.join(projectPath, '.git');
+    try {
+      const rootGitStat = await stat(rootGitPath);
+      if (rootGitStat.isDirectory()) {
+        repositories.push({
+          path: '.',
+          name: path.basename(projectPath)
+        });
+      }
+    } catch {
+      // Root is not a git repo, that's fine
+    }
+
+    // Recursive scan function
+    const scanDirectory = async (dirPath, depth) => {
+      if (depth > maxDepth) return;
+
+      try {
+        const entries = await readdir(dirPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          
+          const entryName = entry.name;
+          
+          // Skip excluded directories
+          if (excludeDirs.has(entryName)) continue;
+          
+          // Skip hidden directories (except we need to check for .git)
+          if (entryName.startsWith('.') && entryName !== '.git') continue;
+
+          const fullPath = path.join(dirPath, entryName);
+
+          // Check if this directory contains a .git folder
+          const gitPath = path.join(fullPath, '.git');
+          try {
+            const gitStat = await stat(gitPath);
+            if (gitStat.isDirectory()) {
+              // Found a sub-repository
+              const relativePath = path.relative(projectPath, fullPath);
+              repositories.push({
+                path: relativePath,
+                name: entryName
+              });
+              // Don't scan inside git repos for more repos (they manage their own)
+              continue;
+            }
+          } catch {
+            // No .git folder, continue scanning
+          }
+
+          // Recursively scan subdirectory
+          await scanDirectory(fullPath, depth + 1);
+        }
+      } catch (error) {
+        // Permission denied or other errors, skip this directory
+        console.warn(`[GitManager] Could not scan directory ${dirPath}:`, error.message);
+      }
+    };
+
+    // Start scanning from root (depth 0)
+    await scanDirectory(projectPath, 0);
+
+    // Sort: root first, then alphabetically by path
+    repositories.sort((a, b) => {
+      if (a.path === '.') return -1;
+      if (b.path === '.') return 1;
+      return a.path.localeCompare(b.path);
+    });
+
+    return repositories;
   }
 }

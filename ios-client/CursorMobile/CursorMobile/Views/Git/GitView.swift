@@ -1,480 +1,135 @@
 import SwiftUI
 
-struct GitView: View {
-    let project: Project
-    @EnvironmentObject var authManager: AuthManager
-    
-    @State private var status: GitStatus?
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var showCommitSheet = false
-    @State private var showBranchSheet = false
-    @State private var selectedFile: GitFileChange?
-    @State private var selectedFileStaged = false
-    @State private var showDiffSheet = false
-    @State private var isPushing = false
-    @State private var isPulling = false
-    @State private var operationMessage: String?
-    
-    // Section collapse states
-    @State private var isStagedExpanded = true
-    @State private var isUnstagedExpanded = true
-    @State private var isUntrackedExpanded = true
-    
-    private var api: APIService? {
-        guard let serverUrl = authManager.serverUrl,
-              let token = authManager.token else { return nil }
-        return APIService(serverUrl: serverUrl, token: token)
-    }
-    
-    var body: some View {
-        ZStack {
-            Group {
-                if status == nil && isLoading {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.2)
-                        Text("Loading git status...")
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = errorMessage, status == nil {
-                    ContentUnavailableView {
-                        Label("Error", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("Retry") {
-                            Task { await loadStatus() }
-                        }
-                    }
-                } else if let status = status {
-                    gitStatusView(status)
-                } else {
-                    ContentUnavailableView {
-                        Label("No Git Status", systemImage: "arrow.triangle.branch")
-                    } description: {
-                        Text("Unable to load git status")
-                    } actions: {
-                        Button("Refresh") {
-                            Task { await loadStatus() }
-                        }
-                    }
-                }
-            }
-            
-            // Overlay loading indicator when refreshing with existing data
-            if isLoading && status != nil {
-                VStack {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                            .padding(8)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    .padding(.horizontal)
-                    Spacer()
-                }
-            }
-        }
-        .navigationTitle("Git")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 12) {
-                    // Pull button
-                    Button {
-                        Task { await pull() }
-                    } label: {
-                        if isPulling {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "arrow.down.circle")
-                        }
-                    }
-                    .disabled(isPulling || isPushing)
-                    
-                    // Push button
-                    Button {
-                        Task { await push() }
-                    } label: {
-                        if isPushing {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "arrow.up.circle")
-                        }
-                    }
-                    .disabled(isPulling || isPushing)
-                }
-            }
-        }
-        .refreshable {
-            await loadStatus()
-        }
-        .task {
-            await loadStatus()
-        }
-        .sheet(isPresented: $showCommitSheet) {
-            GitCommitSheet(project: project, stagedFiles: status?.staged ?? []) {
-                Task { await loadStatus() }
-            }
-        }
-        .sheet(isPresented: $showBranchSheet) {
-            GitBranchSheet(project: project, currentBranch: status?.branch ?? "") {
-                Task { await loadStatus() }
-            }
-        }
-        .sheet(isPresented: $showDiffSheet) {
-            if let file = selectedFile {
-                GitDiffSheet(project: project, file: file, staged: selectedFileStaged)
-            }
-        }
-        .alert("Git Operation", isPresented: .init(
-            get: { operationMessage != nil },
-            set: { if !$0 { operationMessage = nil } }
-        )) {
-            Button("OK") { operationMessage = nil }
-        } message: {
-            if let message = operationMessage {
-                Text(message)
-            }
-        }
-    }
-    
+// MARK: - Conditional View Modifier
+
+extension View {
+    /// Conditionally apply a modifier
     @ViewBuilder
-    private func gitStatusView(_ status: GitStatus) -> some View {
-        VStack(spacing: 0) {
-            List {
-                // Branch section
-                Section {
-                    Button {
-                        showBranchSheet = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "arrow.triangle.branch")
-                                .foregroundStyle(.blue)
-                            Text(status.branch)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            if status.ahead > 0 || status.behind > 0 {
-                                HStack(spacing: 8) {
-                                    if status.ahead > 0 {
-                                        Label("\(status.ahead)", systemImage: "arrow.up")
-                                            .font(.caption)
-                                            .foregroundStyle(.green)
-                                    }
-                                    if status.behind > 0 {
-                                        Label("\(status.behind)", systemImage: "arrow.down")
-                                            .font(.caption)
-                                            .foregroundStyle(.orange)
-                                    }
-                                }
-                            }
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } header: {
-                    Text("Branch")
-                }
+    func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
+    }
+}
+
+// MARK: - iOS-style Jiggle Animation Modifier
+
+extension View {
+    func jiggle(isJiggling: Bool, seed: Int = 0) -> some View {
+        self.modifier(JiggleModifier(isJiggling: isJiggling, seed: seed))
+    }
+}
+
+struct JiggleModifier: ViewModifier {
+    let isJiggling: Bool
+    let seed: Int
+    
+    // Use seed to create slight variations between items
+    private var rotationAmount: Double {
+        1.8 + Double(abs(seed) % 5) * 0.2  // 1.8 to 2.6 degrees
+    }
+    
+    private var duration: Double {
+        0.10 + Double(abs(seed) % 4) * 0.015  // 0.10 to 0.145 seconds
+    }
+    
+    private var phaseOffset: Double {
+        Double(abs(seed) % 7) * 0.3  // Offset to desync animations
+    }
+    
+    func body(content: Content) -> some View {
+        if isJiggling {
+            content
+                .modifier(ContinuousJiggleEffect(
+                    rotationAmount: rotationAmount,
+                    duration: duration,
+                    phaseOffset: phaseOffset
+                ))
+        } else {
+            content
+        }
+    }
+}
+
+struct ContinuousJiggleEffect: ViewModifier {
+    let rotationAmount: Double
+    let duration: Double
+    let phaseOffset: Double
+    
+    @State private var rotation: Double = 0
+    @State private var offset: CGFloat = 0
+    
+    func body(content: Content) -> some View {
+        content
+            .rotationEffect(.degrees(rotation))
+            .offset(x: offset, y: 0)
+            .onAppear {
+                // Start with a random phase
+                rotation = -rotationAmount
+                offset = -0.5
                 
-                // Staged changes
-                if !status.staged.isEmpty {
-                    Section {
-                        if isStagedExpanded {
-                            ForEach(status.staged) { file in
-                                fileRow(file, staged: true)
-                            }
-                        }
-                    } header: {
-                        collapsibleSectionHeader(
-                            title: "Staged Changes",
-                            count: status.staged.count,
-                            isExpanded: $isStagedExpanded,
-                            accentColor: .green,
-                            actionLabel: "Unstage All",
-                            actionIcon: "minus.circle"
-                        ) {
-                            Task { await unstageAllFiles(status.staged.map { $0.path }) }
-                        }
-                    }
-                }
-                
-                // Unstaged changes
-                if !status.unstaged.isEmpty {
-                    Section {
-                        if isUnstagedExpanded {
-                            ForEach(status.unstaged) { file in
-                                fileRow(file, staged: false)
-                            }
-                        }
-                    } header: {
-                        collapsibleSectionHeader(
-                            title: "Changes",
-                            count: status.unstaged.count,
-                            isExpanded: $isUnstagedExpanded,
-                            accentColor: .orange,
-                            actionLabel: "Stage All",
-                            actionIcon: "plus.circle"
-                        ) {
-                            Task { await stageAllFiles(status.unstaged.map { $0.path }) }
-                        }
-                    }
-                }
-                
-                // Untracked files
-                if !status.untracked.isEmpty {
-                    Section {
-                        if isUntrackedExpanded {
-                            ForEach(status.untracked, id: \.self) { file in
-                                untrackedFileRow(file)
-                            }
-                        }
-                    } header: {
-                        collapsibleSectionHeader(
-                            title: "Untracked Files",
-                            count: status.untracked.count,
-                            isExpanded: $isUntrackedExpanded,
-                            accentColor: .gray,
-                            actionLabel: "Stage All",
-                            actionIcon: "plus.circle"
-                        ) {
-                            Task { await stageAllFiles(status.untracked) }
-                        }
-                    }
-                }
-                
-                // Empty state
-                if !status.hasChanges {
-                    Section {
-                        ContentUnavailableView {
-                            Label("No Changes", systemImage: "checkmark.circle")
-                        } description: {
-                            Text("Working tree is clean")
-                        }
+                // Use a slight delay based on phase offset for desync
+                DispatchQueue.main.asyncAfter(deadline: .now() + phaseOffset * 0.05) {
+                    withAnimation(
+                        .easeInOut(duration: duration)
+                        .repeatForever(autoreverses: true)
+                    ) {
+                        rotation = rotationAmount
+                        offset = 0.5
                     }
                 }
             }
-            .listStyle(.insetGrouped)
-            
-            // Floating commit button at bottom
-            if !status.staged.isEmpty {
-                VStack(spacing: 0) {
-                    Divider()
-                    
-                    Button {
-                        showCommitSheet = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                            Text("Commit \(status.staged.count) file\(status.staged.count == 1 ? "" : "s")")
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.accentColor)
-                        .foregroundStyle(.white)
-                        .cornerRadius(12)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color(.systemGroupedBackground))
-                }
-            }
+    }
+}
+
+/// Represents a unified file change for display purposes
+/// Combines both tracked unstaged changes and untracked files
+struct UnifiedFileChange: Identifiable, Hashable {
+    let path: String
+    let status: String  // "modified", "added", "deleted", "renamed", "copied", "unmerged", "untracked"
+    let oldPath: String?
+    let isUntracked: Bool
+    
+    var id: String { path }
+    
+    /// Human-readable status
+    var statusDisplay: String {
+        switch status {
+        case "modified": return "Modified"
+        case "added", "untracked": return "Added"
+        case "deleted": return "Deleted"
+        case "renamed": return "Renamed"
+        case "copied": return "Copied"
+        case "unmerged": return "Conflict"
+        default: return status.capitalized
         }
     }
     
-    @ViewBuilder
-    private func collapsibleSectionHeader(
-        title: String,
-        count: Int,
-        isExpanded: Binding<Bool>,
-        accentColor: Color,
-        actionLabel: String? = nil,
-        actionIcon: String? = nil,
-        action: (() -> Void)? = nil
-    ) -> some View {
-        HStack {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.wrappedValue.toggle()
-                }
-            } label: {
-                HStack {
-                    Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(accentColor)
-                        .frame(width: 16)
-                    
-                    Text(title)
-                        .textCase(.uppercase)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
-                    Text("\(count)")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(accentColor.opacity(0.8), in: Capsule())
-                }
-            }
-            .buttonStyle(.plain)
-            
-            Spacer()
-            
-            if let actionLabel = actionLabel, let action = action {
-                Button {
-                    action()
-                } label: {
-                    HStack(spacing: 4) {
-                        if let icon = actionIcon {
-                            Image(systemName: icon)
-                                .font(.caption2)
-                        }
-                        Text(actionLabel)
-                            .font(.caption)
-                    }
-                    .foregroundStyle(accentColor)
-                }
-                .buttonStyle(.plain)
-            }
+    /// SF Symbol for this status in unstaged context
+    var unstagedIcon: String {
+        switch status {
+        case "modified": return "pencil"
+        case "added", "untracked": return "plus"
+        case "deleted": return "minus"
+        case "renamed": return "arrow.right"
+        case "copied": return "doc.on.doc"
+        case "unmerged": return "exclamationmark.triangle"
+        default: return "questionmark"
         }
     }
     
-    @ViewBuilder
-    private func fileRow(_ file: GitFileChange, staged: Bool) -> some View {
-        HStack(spacing: 12) {
-            // Stage/Unstage button
-            Button {
-                Task {
-                    if staged {
-                        await unstageFile(file.path)
-                    } else {
-                        await stageFile(file.path)
-                    }
-                }
-            } label: {
-                Image(systemName: staged ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(staged ? .green : .secondary)
-            }
-            .buttonStyle(.plain)
-            
-            // File info - tappable for diff
-            Button {
-                selectedFile = file
-                selectedFileStaged = staged
-                showDiffSheet = true
-            } label: {
-                HStack {
-                    Image(systemName: file.statusIcon)
-                        .foregroundStyle(statusColor(for: file))
-                        .frame(width: 24)
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(file.path.components(separatedBy: "/").last ?? file.path)
-                            .foregroundStyle(.primary)
-                        if file.path.contains("/") {
-                            Text(file.path.components(separatedBy: "/").dropLast().joined(separator: "/"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    Text(file.statusDisplay)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .buttonStyle(.plain)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            if staged {
-                Button {
-                    Task { await unstageFile(file.path) }
-                } label: {
-                    Label("Unstage", systemImage: "minus.circle")
-                }
-                .tint(.orange)
-            } else {
-                Button {
-                    Task { await stageFile(file.path) }
-                } label: {
-                    Label("Stage", systemImage: "plus.circle")
-                }
-                .tint(.green)
-            }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if !staged {
-                Button(role: .destructive) {
-                    Task { await discardFile(file.path) }
-                } label: {
-                    Label("Discard", systemImage: "trash")
-                }
-            }
-        }
+    /// SF Symbol for this status in staged context (always checkmark for staged files)
+    var stagedIcon: String {
+        return "checkmark"
     }
     
-    @ViewBuilder
-    private func untrackedFileRow(_ path: String) -> some View {
-        HStack(spacing: 12) {
-            // Stage button
-            Button {
-                Task { await stageFile(path) }
-            } label: {
-                Image(systemName: "circle")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            
-            // File info
-            HStack {
-                Image(systemName: "questionmark.circle")
-                    .foregroundStyle(.gray)
-                    .frame(width: 24)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(path.components(separatedBy: "/").last ?? path)
-                        .foregroundStyle(.primary)
-                    if path.contains("/") {
-                        Text(path.components(separatedBy: "/").dropLast().joined(separator: "/"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                Text("Untracked")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button {
-                Task { await stageFile(path) }
-            } label: {
-                Label("Stage", systemImage: "plus.circle")
-            }
-            .tint(.green)
-        }
-    }
-    
-    private func statusColor(for file: GitFileChange) -> Color {
-        switch file.status {
+    /// Color for this status
+    var statusColor: Color {
+        switch status {
         case "modified": return .orange
-        case "added": return .green
+        case "added", "untracked": return .green
         case "deleted": return .red
         case "renamed", "copied": return .blue
         case "unmerged": return .yellow
@@ -482,104 +137,453 @@ struct GitView: View {
         }
     }
     
+    /// Create from a GitFileChange (tracked file)
+    init(from change: GitFileChange) {
+        self.path = change.path
+        self.status = change.status
+        self.oldPath = change.oldPath
+        self.isUntracked = false
+    }
+    
+    /// Create from an untracked file path
+    init(untrackedPath: String) {
+        self.path = untrackedPath
+        self.status = "untracked"
+        self.oldPath = nil
+        self.isUntracked = true
+    }
+}
+
+// MARK: - GitView (Multi-Repository Support)
+
+struct GitView: View {
+    let project: Project
+    @EnvironmentObject var authManager: AuthManager
+    
+    // Repository list state
+    @State private var repositories: [GitRepository] = []
+    @State private var repositoriesWithStatus: [GitRepositoryWithStatus] = []
+    @State private var isScanning = false
+    @State private var isLoadingStatus = false
+    @State private var hasLoadedFromCache = false
+    @State private var errorMessage: String?
+    
+    // Expansion state for each repository (keyed by repo path)
+    @State private var expandedRepos: Set<String> = []
+    
+    // Search, filter, and sort state
+    @State private var searchText = ""
+    @State private var filterSettings = GitFilterSettings()
+    @State private var showFilterSheet = false
+    @State private var showSortMenu = false
+    
+    /// Whether to show search/filter/sort controls (only for multiple repos)
+    private var showControls: Bool {
+        repositories.count > 1
+    }
+    
+    private var api: APIService? {
+        guard let serverUrl = authManager.serverUrl,
+              let token = authManager.token else { return nil }
+        return APIService(serverUrl: serverUrl, token: token)
+    }
+    
+    /// Repositories filtered by search query and filter settings, then sorted
+    private var displayedRepositories: [GitRepositoryWithStatus] {
+        var result = repositoriesWithStatus
+        
+        // Apply search filter
+        if !searchText.isEmpty {
+            result = result.filter { $0.matchesSearch(searchText) }
+        }
+        
+        // Apply visibility filters
+        result = result.filter { filterSettings.shouldShow($0) }
+        
+        // Apply sorting
+        result = filterSettings.sorted(result)
+        
+        return result
+    }
+    
+    /// Number of repositories hidden by filters
+    private var hiddenCount: Int {
+        let afterSearch = searchText.isEmpty 
+            ? repositoriesWithStatus 
+            : repositoriesWithStatus.filter { $0.matchesSearch(searchText) }
+        let afterFilters = afterSearch.filter { filterSettings.shouldShow($0) }
+        return afterSearch.count - afterFilters.count
+    }
+    
+    var body: some View {
+        Group {
+            if repositories.isEmpty && !hasLoadedFromCache {
+                // Initial loading state
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(1.2)
+                    Text("Loading repositories...")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if repositories.isEmpty {
+                // No repositories found - show scan prompt
+                noRepositoriesView
+            } else {
+                // Display repositories with search/filter controls
+                repositoriesListView
+            }
+        }
+        .navigationTitle("Git")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 12) {
+                    // Sort/Filter/Search menu - only show for multiple repos
+                    if showControls {
+                        Menu {
+                            // Sort options
+                            Section("Sort By") {
+                                ForEach(GitFilterSettings.SortOption.allCases, id: \.self) { option in
+                                    Button {
+                                        filterSettings.sortOption = option
+                                    } label: {
+                                        HStack {
+                                            Label(option.displayName, systemImage: option.icon)
+                                            if filterSettings.sortOption == option {
+                                                Spacer()
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Quick filters
+                            Section("Filters") {
+                                Toggle("Hide clean repos", isOn: $filterSettings.hideCleanRepos)
+                                Toggle("Hide synced repos", isOn: $filterSettings.hideSyncedRepos)
+                            }
+                            
+                            // More options
+                            Section {
+                                Button {
+                                    showFilterSheet = true
+                                } label: {
+                                    Label("Excluded Paths...", systemImage: "folder.badge.minus")
+                                }
+                                
+                                if filterSettings.hasActiveFilters {
+                                    Button(role: .destructive) {
+                                        withAnimation {
+                                            filterSettings.reset()
+                                        }
+                                    } label: {
+                                        Label("Reset All", systemImage: "arrow.counterclockwise")
+                                    }
+                                }
+                            }
+                        } label: {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: filterSettings.hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                                
+                                // Badge for active filter count
+                                if filterSettings.activeFilterCount > 0 {
+                                    Text("\(filterSettings.activeFilterCount)")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(3)
+                                        .background(Color.red)
+                                        .clipShape(Circle())
+                                        .offset(x: 6, y: -6)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Refresh button
+                    Button {
+                        Task { await scanForRepositories() }
+                    } label: {
+                        if isScanning {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(isScanning)
+                }
+            }
+        }
+        .if(showControls) { view in
+            view.searchable(text: $searchText, prompt: "Search repos, files...")
+        }
+        .refreshable {
+            await scanForRepositories()
+        }
+        .task {
+            await loadRepositories()
+            loadFilterSettings()
+        }
+        .onChange(of: project.id) { _, _ in
+            // Reset state when project changes
+            repositories = []
+            repositoriesWithStatus = []
+            hasLoadedFromCache = false
+            expandedRepos = []
+            errorMessage = nil
+            searchText = ""
+            Task {
+                await loadRepositories()
+            }
+        }
+        .onChange(of: filterSettings) { _, newSettings in
+            saveFilterSettings(newSettings)
+        }
+        .sheet(isPresented: $showFilterSheet) {
+            GitFilterSheet(settings: $filterSettings)
+        }
+    }
+    
+    // MARK: - No Repositories View
+    
+    @ViewBuilder
+    private var noRepositoriesView: some View {
+        ContentUnavailableView {
+            Label("No Repositories Found", systemImage: "arrow.triangle.branch")
+        } description: {
+            Text("Scan this project to discover git repositories, including sub-repositories.")
+        } actions: {
+            Button {
+                Task { await scanForRepositories() }
+            } label: {
+                HStack {
+                    if isScanning {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    Text(isScanning ? "Scanning..." : "Scan for Repositories")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isScanning)
+        }
+    }
+    
+    // MARK: - Repositories List View
+    
+    @ViewBuilder
+    private var repositoriesListView: some View {
+        List {
+            // Info section - only show for multiple repos when there are filters/hidden items
+            if showControls && (hiddenCount > 0 || isLoadingStatus) {
+                Section {
+                    HStack {
+                        if isLoadingStatus {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .padding(.trailing, 4)
+                            Text("Loading status...")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.blue)
+                            Text("\(displayedRepositories.count) shown, \(hiddenCount) hidden")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        if hiddenCount > 0 {
+                            Button("Show All") {
+                                withAnimation {
+                                    filterSettings.hideCleanRepos = false
+                                    filterSettings.hideSyncedRepos = false
+                                    searchText = ""
+                                }
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                }
+            }
+            
+            // Empty state when filters hide all repos
+            if displayedRepositories.isEmpty && !repositoriesWithStatus.isEmpty {
+                Section {
+                    VStack(spacing: 12) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text("All repositories are hidden by current filters")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Clear Filters") {
+                            withAnimation {
+                                filterSettings.hideCleanRepos = false
+                                filterSettings.hideSyncedRepos = false
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical)
+                }
+            }
+            
+            // Repository sections
+            ForEach(displayedRepositories) { repoWithStatus in
+                GitRepoSection(
+                    project: project,
+                    repository: repoWithStatus.repository,
+                    isExpanded: Binding(
+                        get: { expandedRepos.contains(repoWithStatus.repository.path) },
+                        set: { expanded in
+                            if expanded {
+                                expandedRepos.insert(repoWithStatus.repository.path)
+                            } else {
+                                expandedRepos.remove(repoWithStatus.repository.path)
+                            }
+                        }
+                    ),
+                    onStatusChanged: {
+                        Task { await refreshRepositoryStatus(repoWithStatus.repository) }
+                    }
+                )
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+    
     // MARK: - Actions
     
-    private func loadStatus() async {
+    /// Load repositories from cache, then refresh if stale
+    private func loadRepositories() async {
+        // Try to load from cache first
+        if let cached = CacheManager.shared.loadGitRepositories(projectId: project.id) {
+            repositories = cached.data
+            repositoriesWithStatus = cached.data.map { GitRepositoryWithStatus(repository: $0, status: nil) }
+            hasLoadedFromCache = true
+            
+            // Expand the first repo by default if it's the only one
+            if cached.data.count == 1, let first = cached.data.first {
+                expandedRepos.insert(first.path)
+            }
+            
+            // Load status for all repositories
+            await loadAllRepositoryStatuses()
+            
+            // If cache is stale, refresh in background
+            if cached.isStale {
+                await scanForRepositories()
+            }
+        } else {
+            // No cache - need to scan
+            hasLoadedFromCache = true  // Mark as loaded so we show the empty state
+            await scanForRepositories()
+        }
+    }
+    
+    /// Scan the project for git repositories
+    private func scanForRepositories() async {
         guard let api = api else { return }
         
-        isLoading = true
+        isScanning = true
         errorMessage = nil
         
         do {
-            status = try await api.getGitStatus(projectId: project.id)
+            let repos = try await api.scanGitRepositories(projectId: project.id)
+            
+            // Cache the results
+            CacheManager.shared.saveGitRepositories(repos, projectId: project.id)
+            
+            repositories = repos
+            repositoriesWithStatus = repos.map { GitRepositoryWithStatus(repository: $0, status: nil) }
+            
+            // Expand the first repo by default if it's the only one and nothing is expanded
+            if repos.count == 1, let first = repos.first, expandedRepos.isEmpty {
+                expandedRepos.insert(first.path)
+            }
+            
+            // If there are multiple repos and nothing is expanded, expand all
+            if repos.count > 1 && expandedRepos.isEmpty {
+                for repo in repos {
+                    expandedRepos.insert(repo.path)
+                }
+            }
+            
+            // Load status for all repositories
+            await loadAllRepositoryStatuses()
         } catch {
+            print("[GitView] scanForRepositories error: \(error)")
             errorMessage = error.localizedDescription
         }
         
-        isLoading = false
+        isScanning = false
     }
     
-    private func stageFile(_ path: String) async {
+    /// Load status for all repositories to enable filtering and sorting
+    private func loadAllRepositoryStatuses() async {
         guard let api = api else { return }
         
-        do {
-            _ = try await api.gitStage(projectId: project.id, files: [path])
-            await loadStatus()
-        } catch {
-            operationMessage = "Failed to stage: \(error.localizedDescription)"
+        isLoadingStatus = true
+        
+        // Load status for each repository concurrently
+        await withTaskGroup(of: (String, GitStatus?).self) { group in
+            for repo in repositories {
+                group.addTask {
+                    let repoPath = repo.isRoot ? nil : repo.path
+                    do {
+                        let status = try await api.getGitStatus(projectId: project.id, repoPath: repoPath)
+                        return (repo.path, status)
+                    } catch {
+                        print("[GitView] Failed to load status for \(repo.path): \(error)")
+                        return (repo.path, nil)
+                    }
+                }
+            }
+            
+            // Collect results and update repositoriesWithStatus
+            for await (repoPath, status) in group {
+                if let index = repositoriesWithStatus.firstIndex(where: { $0.repository.path == repoPath }) {
+                    repositoriesWithStatus[index].status = status
+                }
+            }
         }
+        
+        isLoadingStatus = false
     }
     
-    private func unstageFile(_ path: String) async {
+    /// Refresh status for a single repository
+    private func refreshRepositoryStatus(_ repo: GitRepository) async {
         guard let api = api else { return }
         
+        let repoPath = repo.isRoot ? nil : repo.path
         do {
-            _ = try await api.gitUnstage(projectId: project.id, files: [path])
-            await loadStatus()
+            let status = try await api.getGitStatus(projectId: project.id, repoPath: repoPath)
+            if let index = repositoriesWithStatus.firstIndex(where: { $0.repository.path == repo.path }) {
+                repositoriesWithStatus[index].status = status
+            }
         } catch {
-            operationMessage = "Failed to unstage: \(error.localizedDescription)"
+            print("[GitView] Failed to refresh status for \(repo.path): \(error)")
         }
     }
     
-    private func stageAllFiles(_ paths: [String]) async {
-        guard let api = api, !paths.isEmpty else { return }
-        
-        do {
-            _ = try await api.gitStage(projectId: project.id, files: paths)
-            await loadStatus()
-        } catch {
-            operationMessage = "Failed to stage files: \(error.localizedDescription)"
+    // MARK: - Filter Settings Persistence
+    
+    private func loadFilterSettings() {
+        if let settings = CacheManager.shared.loadGitFilterSettings() {
+            filterSettings = settings
         }
     }
     
-    private func unstageAllFiles(_ paths: [String]) async {
-        guard let api = api, !paths.isEmpty else { return }
-        
-        do {
-            _ = try await api.gitUnstage(projectId: project.id, files: paths)
-            await loadStatus()
-        } catch {
-            operationMessage = "Failed to unstage files: \(error.localizedDescription)"
-        }
-    }
-    
-    private func discardFile(_ path: String) async {
-        guard let api = api else { return }
-        
-        do {
-            _ = try await api.gitDiscard(projectId: project.id, files: [path])
-            await loadStatus()
-        } catch {
-            operationMessage = "Failed to discard: \(error.localizedDescription)"
-        }
-    }
-    
-    private func push() async {
-        guard let api = api else { return }
-        
-        isPushing = true
-        do {
-            let result = try await api.gitPush(projectId: project.id)
-            operationMessage = result.output ?? "Push successful"
-            await loadStatus()
-        } catch {
-            operationMessage = "Push failed: \(error.localizedDescription)"
-        }
-        isPushing = false
-    }
-    
-    private func pull() async {
-        guard let api = api else { return }
-        
-        isPulling = true
-        do {
-            let result = try await api.gitPull(projectId: project.id)
-            operationMessage = result.output ?? "Pull successful"
-            await loadStatus()
-        } catch {
-            operationMessage = "Pull failed: \(error.localizedDescription)"
-        }
-        isPulling = false
+    private func saveFilterSettings(_ settings: GitFilterSettings) {
+        CacheManager.shared.saveGitFilterSettings(settings)
     }
 }
 

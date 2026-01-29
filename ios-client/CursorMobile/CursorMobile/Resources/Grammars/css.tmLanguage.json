@@ -1,0 +1,92 @@
+{
+  "name": "CSS",
+  "scopeName": "source.css",
+  "fileTypes": ["css"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#at-rules" },
+    { "include": "#selectors" },
+    { "include": "#properties" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.css",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "at-rules": {
+      "patterns": [
+        {
+          "name": "keyword.control.at-rule.css",
+          "match": "@(import|media|keyframes|font-face|supports|charset|namespace|page|counter-style|property|layer|container|scope)\\b"
+        }
+      ]
+    },
+    "selectors": {
+      "patterns": [
+        {
+          "name": "entity.name.tag.css",
+          "match": "\\b(a|abbr|address|area|article|aside|audio|b|base|bdi|bdo|blockquote|body|br|button|canvas|caption|cite|code|col|colgroup|data|datalist|dd|del|details|dfn|dialog|div|dl|dt|em|embed|fieldset|figcaption|figure|footer|form|h[1-6]|head|header|hgroup|hr|html|i|iframe|img|input|ins|kbd|label|legend|li|link|main|map|mark|meta|meter|nav|noscript|object|ol|optgroup|option|output|p|param|picture|pre|progress|q|rp|rt|ruby|s|samp|script|section|select|slot|small|source|span|strong|style|sub|summary|sup|table|tbody|td|template|textarea|tfoot|th|thead|time|title|tr|track|u|ul|var|video|wbr)\\b"
+        },
+        {
+          "name": "entity.other.attribute-name.class.css",
+          "match": "\\.[a-zA-Z_-][a-zA-Z0-9_-]*"
+        },
+        {
+          "name": "entity.other.attribute-name.id.css",
+          "match": "#[a-zA-Z_-][a-zA-Z0-9_-]*"
+        },
+        {
+          "name": "entity.other.attribute-name.pseudo-class.css",
+          "match": ":[a-zA-Z_-][a-zA-Z0-9_-]*(\\([^)]*\\))?"
+        },
+        {
+          "name": "entity.other.attribute-name.pseudo-element.css",
+          "match": "::[a-zA-Z_-][a-zA-Z0-9_-]*"
+        }
+      ]
+    },
+    "properties": {
+      "patterns": [
+        {
+          "name": "support.type.property-name.css",
+          "match": "\\b[a-z-]+(?=\\s*:)"
+        },
+        {
+          "name": "support.constant.property-value.css",
+          "match": "\\b(inherit|initial|unset|revert|auto|none|normal|bold|italic|underline|block|inline|flex|grid|absolute|relative|fixed|sticky|hidden|visible|scroll|center|left|right|top|bottom|solid|dashed|dotted|transparent)\\b"
+        },
+        {
+          "name": "constant.numeric.css",
+          "match": "-?[0-9]+(\\.[0-9]+)?(px|em|rem|%|vh|vw|vmin|vmax|ch|ex|cm|mm|in|pt|pc|deg|rad|grad|turn|s|ms|Hz|kHz|dpi|dpcm|dppx)?"
+        },
+        {
+          "name": "constant.other.color.rgb-value.css",
+          "match": "#[0-9a-fA-F]{3,8}\\b"
+        },
+        {
+          "name": "support.function.css",
+          "match": "\\b(rgb|rgba|hsl|hsla|url|calc|var|min|max|clamp|linear-gradient|radial-gradient|conic-gradient|repeat|attr|counter|env)\\s*(?=\\()"
+        },
+        {
+          "name": "variable.css",
+          "match": "--[a-zA-Z_-][a-zA-Z0-9_-]*"
+        },
+        {
+          "name": "string.quoted.double.css",
+          "begin": "\"",
+          "end": "\""
+        },
+        {
+          "name": "string.quoted.single.css",
+          "begin": "'",
+          "end": "'"
+        }
+      ]
+    }
+  }
+}

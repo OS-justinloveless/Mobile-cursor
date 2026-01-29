@@ -3,6 +3,7 @@ import SwiftUI
 struct GitCommitSheet: View {
     let project: Project
     let stagedFiles: [GitFileChange]
+    let repoPath: String?  // nil for root repo, relative path for sub-repos
     let onCommit: () -> Void
     
     @EnvironmentObject var authManager: AuthManager
@@ -10,6 +11,7 @@ struct GitCommitSheet: View {
     
     @State private var commitMessage = ""
     @State private var isCommitting = false
+    @State private var isGenerating = false
     @State private var errorMessage: String?
     
     private var api: APIService? {
@@ -18,16 +20,54 @@ struct GitCommitSheet: View {
         return APIService(serverUrl: serverUrl, token: token)
     }
     
+    // Convenience init for backward compatibility (root repo)
+    init(project: Project, stagedFiles: [GitFileChange], onCommit: @escaping () -> Void) {
+        self.project = project
+        self.stagedFiles = stagedFiles
+        self.repoPath = nil
+        self.onCommit = onCommit
+    }
+    
+    // Full init with repoPath
+    init(project: Project, stagedFiles: [GitFileChange], repoPath: String?, onCommit: @escaping () -> Void) {
+        self.project = project
+        self.stagedFiles = stagedFiles
+        self.repoPath = repoPath
+        self.onCommit = onCommit
+    }
+    
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     TextField("Commit message", text: $commitMessage, axis: .vertical)
                         .lineLimit(3...6)
+                        .disabled(isGenerating)
+                    
+                    // AI Generate button
+                    Button {
+                        Task { await generateCommitMessage() }
+                    } label: {
+                        HStack {
+                            if isGenerating {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Generating...")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Image(systemName: "sparkles")
+                                    .foregroundStyle(.purple)
+                                Text("Generate with AI")
+                                    .foregroundStyle(.purple)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .disabled(isGenerating || stagedFiles.isEmpty)
                 } header: {
                     Text("Message")
                 } footer: {
-                    Text("Describe your changes briefly")
+                    Text("Describe your changes briefly, or use AI to generate a message based on your staged changes")
                 }
                 
                 Section {
@@ -78,7 +118,7 @@ struct GitCommitSheet: View {
                             Text("Commit")
                         }
                     }
-                    .disabled(commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCommitting)
+                    .disabled(commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCommitting || isGenerating)
                 }
             }
         }
@@ -102,7 +142,7 @@ struct GitCommitSheet: View {
         errorMessage = nil
         
         do {
-            _ = try await api.gitCommit(projectId: project.id, message: commitMessage.trimmingCharacters(in: .whitespacesAndNewlines))
+            _ = try await api.gitCommit(projectId: project.id, message: commitMessage.trimmingCharacters(in: .whitespacesAndNewlines), repoPath: repoPath)
             onCommit()
             dismiss()
         } catch {
@@ -110,6 +150,22 @@ struct GitCommitSheet: View {
         }
         
         isCommitting = false
+    }
+    
+    private func generateCommitMessage() async {
+        guard let api = api else { return }
+        
+        isGenerating = true
+        errorMessage = nil
+        
+        do {
+            let message = try await api.generateCommitMessage(projectId: project.id, repoPath: repoPath)
+            commitMessage = message
+        } catch {
+            errorMessage = "Failed to generate: \(error.localizedDescription)"
+        }
+        
+        isGenerating = false
     }
 }
 

@@ -1,0 +1,116 @@
+{
+  "name": "Go",
+  "scopeName": "source.go",
+  "fileTypes": ["go"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#functions" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.go",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.go",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.go",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.go",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.raw.go",
+          "begin": "`",
+          "end": "`"
+        },
+        {
+          "name": "string.quoted.rune.go",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.go",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.go",
+          "match": "\\b(if|else|switch|case|default|for|range|break|continue|return|goto|fallthrough|select)\\b"
+        },
+        {
+          "name": "keyword.declaration.go",
+          "match": "\\b(package|import|func|var|const|type|struct|interface|map|chan|go|defer)\\b"
+        },
+        {
+          "name": "constant.language.go",
+          "match": "\\b(true|false|nil|iota)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.builtin.go",
+          "match": "\\b(bool|byte|complex64|complex128|error|float32|float64|int|int8|int16|int32|int64|rune|string|uint|uint8|uint16|uint32|uint64|uintptr|any|comparable)\\b"
+        },
+        {
+          "name": "entity.name.type.go",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.go",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        },
+        {
+          "name": "support.function.builtin.go",
+          "match": "\\b(append|cap|clear|close|complex|copy|delete|imag|len|make|max|min|new|panic|print|println|real|recover)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.go",
+          "match": "\\b(0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?i?)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.go",
+          "match": "[+\\-*/%=<>!&|^~:]+|<-|:="
+        }
+      ]
+    }
+  }
+}

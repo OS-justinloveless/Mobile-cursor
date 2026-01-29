@@ -118,7 +118,7 @@ struct FileViewerSheet: View {
                     .disableAutocorrection(true)
             } else {
                 ScrollView {
-                    CodeView(content: content, language: fileInfo?.language ?? "plaintext")
+                    HighlightedCodeView(content: content, language: fileInfo?.language ?? "plaintext")
                 }
             }
         }

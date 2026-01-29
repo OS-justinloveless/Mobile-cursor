@@ -1,0 +1,126 @@
+{
+  "name": "Python",
+  "scopeName": "source.python",
+  "fileTypes": ["py", "pyw", "pyi"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#functions" },
+    { "include": "#decorators" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.hash.python",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.python",
+          "begin": "(f|r|b|fr|rf|br|rb)?\"\"\"",
+          "end": "\"\"\""
+        },
+        {
+          "name": "string.quoted.triple.single.python",
+          "begin": "(f|r|b|fr|rf|br|rb)?'''",
+          "end": "'''"
+        },
+        {
+          "name": "string.quoted.double.python",
+          "begin": "(f|r|b|fr|rf|br|rb)?\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.python",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.python",
+              "begin": "\\{",
+              "end": "\\}"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.python",
+          "begin": "(f|r|b|fr|rf|br|rb)?'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.python",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.python",
+              "begin": "\\{",
+              "end": "\\}"
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.python",
+          "match": "\\b(if|elif|else|for|while|break|continue|return|yield|try|except|finally|raise|with|as|assert|pass|match|case)\\b"
+        },
+        {
+          "name": "keyword.declaration.python",
+          "match": "\\b(def|class|lambda|import|from|global|nonlocal|async|await)\\b"
+        },
+        {
+          "name": "constant.language.python",
+          "match": "\\b(True|False|None|self|cls|__name__|__main__|__file__|__doc__)\\b"
+        },
+        {
+          "name": "keyword.operator.python",
+          "match": "\\b(and|or|not|in|is|del)\\b"
+        }
+      ]
+    },
+    "decorators": {
+      "patterns": [
+        {
+          "name": "entity.name.function.decorator.python",
+          "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.python",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        },
+        {
+          "name": "support.function.builtin.python",
+          "match": "\\b(print|len|range|str|int|float|list|dict|set|tuple|bool|type|isinstance|issubclass|hasattr|getattr|setattr|delattr|callable|iter|next|open|input|abs|all|any|bin|chr|ord|dir|divmod|enumerate|eval|exec|filter|format|frozenset|globals|hash|help|hex|id|locals|map|max|min|oct|pow|repr|reversed|round|slice|sorted|sum|super|vars|zip|__import__|staticmethod|classmethod|property)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.python",
+          "match": "\\b(0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9_]+)?j?)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.python",
+          "match": "[+\\-*/%=<>!&|^~@:]+|->|\\*\\*|//"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "name": "Markdown",
+  "scopeName": "text.markdown",
+  "fileTypes": ["md", "markdown", "mdown", "mkd"],
+  "patterns": [
+    { "include": "#headings" },
+    { "include": "#code" },
+    { "include": "#emphasis" },
+    { "include": "#links" },
+    { "include": "#lists" },
+    { "include": "#blockquotes" },
+    { "include": "#horizontal-rules" }
+  ],
+  "repository": {
+    "headings": {
+      "patterns": [
+        {
+          "name": "markup.heading.1.markdown",
+          "match": "^#\\s+.*$"
+        },
+        {
+          "name": "markup.heading.2.markdown",
+          "match": "^##\\s+.*$"
+        },
+        {
+          "name": "markup.heading.3.markdown",
+          "match": "^###\\s+.*$"
+        },
+        {
+          "name": "markup.heading.4.markdown",
+          "match": "^####\\s+.*$"
+        },
+        {
+          "name": "markup.heading.5.markdown",
+          "match": "^#####\\s+.*$"
+        },
+        {
+          "name": "markup.heading.6.markdown",
+          "match": "^######\\s+.*$"
+        }
+      ]
+    },
+    "code": {
+      "patterns": [
+        {
+          "name": "markup.fenced_code.block.markdown",
+          "begin": "^```.*$",
+          "end": "^```$"
+        },
+        {
+          "name": "markup.inline.raw.string.markdown",
+          "match": "`[^`]+`"
+        },
+        {
+          "name": "markup.raw.block.markdown",
+          "match": "^(    |\\t).*$"
+        }
+      ]
+    },
+    "emphasis": {
+      "patterns": [
+        {
+          "name": "markup.bold.markdown",
+          "match": "\\*\\*[^*]+\\*\\*|__[^_]+__"
+        },
+        {
+          "name": "markup.italic.markdown",
+          "match": "\\*[^*]+\\*|_[^_]+_"
+        },
+        {
+          "name": "markup.strikethrough.markdown",
+          "match": "~~[^~]+~~"
+        }
+      ]
+    },
+    "links": {
+      "patterns": [
+        {
+          "name": "meta.link.markdown",
+          "match": "\\[([^\\]]+)\\]\\(([^)]+)\\)",
+          "captures": {
+            "1": { "name": "string.other.link.title.markdown" },
+            "2": { "name": "markup.underline.link.markdown" }
+          }
+        },
+        {
+          "name": "meta.image.markdown",
+          "match": "!\\[([^\\]]+)\\]\\(([^)]+)\\)"
+        },
+        {
+          "name": "markup.underline.link.markdown",
+          "match": "<https?://[^>]+>"
+        }
+      ]
+    },
+    "lists": {
+      "patterns": [
+        {
+          "name": "markup.list.unnumbered.markdown",
+          "match": "^\\s*[-*+]\\s+"
+        },
+        {
+          "name": "markup.list.numbered.markdown",
+          "match": "^\\s*[0-9]+\\.\\s+"
+        },
+        {
+          "name": "markup.list.checkbox.markdown",
+          "match": "^\\s*[-*+]\\s+\\[[xX ]\\]\\s+"
+        }
+      ]
+    },
+    "blockquotes": {
+      "patterns": [
+        {
+          "name": "markup.quote.markdown",
+          "match": "^>\\s+.*$"
+        }
+      ]
+    },
+    "horizontal-rules": {
+      "patterns": [
+        {
+          "name": "meta.separator.markdown",
+          "match": "^(---+|\\*\\*\\*+|___+)\\s*$"
+        }
+      ]
+    }
+  }
+}
