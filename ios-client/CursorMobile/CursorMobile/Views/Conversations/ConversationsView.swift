@@ -230,6 +230,10 @@ struct ConversationDetailView: View {
     
     let conversation: Conversation
     
+    // Initial model and mode (passed from chat creation)
+    let initialModelId: String?
+    let initialMode: ChatMode
+    
     // Number of recent messages to load initially (increased for better UX)
     private let initialMessageLimit = 200
     
@@ -248,6 +252,12 @@ struct ConversationDetailView: View {
     @FocusState private var isInputFocused: Bool
     @State private var selectedImages: [SelectedImage] = []
     
+    // Model and mode state
+    @State private var currentModelId: String?
+    @State private var currentMode: ChatMode = .agent
+    @State private var availableModels: [AIModel] = []
+    @State private var isLoadingModels = false
+    
     // Suggestion state for @ and / triggers
     @State private var triggerState: TriggerType? = nil
     @State private var triggerQuery: String = ""
@@ -256,6 +266,21 @@ struct ConversationDetailView: View {
     @State private var isLoadingSuggestions = false
     @State private var suggestionsCache: [Suggestion] = []
     @State private var lastSuggestionsFetch: Date? = nil
+    
+    /// Convenience initializer with default model/mode
+    init(conversation: Conversation, initialModelId: String? = nil, initialMode: ChatMode = .agent) {
+        self.conversation = conversation
+        self.initialModelId = initialModelId
+        self.initialMode = initialMode
+    }
+    
+    /// Current model name for display
+    private var currentModelName: String {
+        if let modelId = currentModelId, let model = availableModels.first(where: { $0.id == modelId }) {
+            return model.name
+        }
+        return currentModelId ?? "Auto"
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -298,12 +323,18 @@ struct ConversationDetailView: View {
         }
         .navigationTitle("Conversation")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                modelModeMenu
+            }
+        }
         .onAppear {
             loadMessages()
             prefetchSuggestions()
+            initializeModelMode()
         }
         .navigationDestination(item: $forkedConversation) { forkedConv in
-            ConversationDetailView(conversation: forkedConv)
+            ConversationDetailView(conversation: forkedConv, initialModelId: currentModelId, initialMode: currentMode)
         }
         .alert("Conversation Forked", isPresented: $showForkSuccess) {
             Button("Open Fork") {
@@ -389,6 +420,115 @@ struct ConversationDetailView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
             .background(Color(.secondarySystemBackground))
+        }
+    }
+    
+    // MARK: - Model/Mode Menu
+    
+    private var modelModeMenu: some View {
+        Menu {
+            // Model section
+            Section("Model") {
+                if isLoadingModels {
+                    Text("Loading...")
+                } else if availableModels.isEmpty {
+                    Button {
+                        loadAvailableModels()
+                    } label: {
+                        Label("Load Models", systemImage: "arrow.clockwise")
+                    }
+                } else {
+                    ForEach(availableModels) { model in
+                        Button {
+                            currentModelId = model.id
+                        } label: {
+                            HStack {
+                                Text(model.name)
+                                if currentModelId == model.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Divider()
+            
+            // Mode section
+            Section("Mode") {
+                ForEach(ChatMode.allCases) { mode in
+                    Button {
+                        currentMode = mode
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(mode.displayName)
+                                Text(mode.description)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if currentMode == mode {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(currentMode.displayName)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(.tertiarySystemBackground))
+            .cornerRadius(6)
+        }
+    }
+    
+    private func initializeModelMode() {
+        currentModelId = initialModelId
+        currentMode = initialMode
+        loadAvailableModels()
+    }
+    
+    private func loadAvailableModels() {
+        guard !isLoadingModels else { return }
+        isLoadingModels = true
+        
+        Task {
+            guard let api = authManager.createAPIService() else {
+                await MainActor.run {
+                    isLoadingModels = false
+                }
+                return
+            }
+            
+            do {
+                let models = try await api.getAvailableModels()
+                await MainActor.run {
+                    availableModels = models
+                    // If no model was set, use current or default
+                    if currentModelId == nil {
+                        if let current = models.first(where: { $0.isCurrent }) {
+                            currentModelId = current.id
+                        } else if let defaultModel = models.first(where: { $0.isDefault }) {
+                            currentModelId = defaultModel.id
+                        }
+                    }
+                    isLoadingModels = false
+                }
+            } catch {
+                await MainActor.run {
+                    isLoadingModels = false
+                    print("[ConversationDetailView] Failed to load models: \(error)")
+                }
+            }
         }
     }
     
@@ -942,7 +1082,9 @@ struct ConversationDetailView: View {
                     conversationId: conversationId,
                     message: userMessage,
                     workspaceId: workspaceId,
-                    attachments: attachments
+                    attachments: attachments,
+                    model: currentModelId,
+                    mode: currentMode
                 ) { [weak authManager] event in
                     // Only process if authManager still exists (view likely still active)
                     guard authManager != nil else { return }

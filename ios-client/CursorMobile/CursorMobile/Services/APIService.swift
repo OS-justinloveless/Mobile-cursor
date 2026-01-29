@@ -136,6 +136,19 @@ class APIService {
         }
     }
     
+    /// Get available AI models from the server
+    /// Models are fetched from cursor-agent and cached by the server
+    /// - Returns: Array of available AI models
+    func getAvailableModels() async throws -> [AIModel] {
+        let data = try await makeRequest(endpoint: "/api/system/models")
+        do {
+            let response = try decoder.decode(ModelsResponse.self, from: data)
+            return response.models
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
     func openInCursor(path: String) async throws -> OpenCursorResponse {
         let body = try JSONEncoder().encode(OpenCursorRequest(path: path))
         let data = try await makeRequest(endpoint: "/api/system/open-cursor", method: "POST", body: body)
@@ -530,11 +543,21 @@ class APIService {
     /// Send a message to continue a conversation, receiving streaming response via callback
     /// This function uses URLSessionDataTask with a delegate for proper SSE handling
     /// The function returns when the stream completes or errors
+    /// - Parameters:
+    ///   - conversationId: The conversation ID to send the message to
+    ///   - message: The message text
+    ///   - workspaceId: Optional workspace ID for context
+    ///   - attachments: Optional attachments (images, files)
+    ///   - model: The AI model to use (e.g., "sonnet-4.5"). Pass nil to use conversation default.
+    ///   - mode: The execution mode (agent, plan, ask). Pass nil to use conversation default.
+    ///   - onEvent: Callback for streaming events
     func sendMessage(
         conversationId: String,
         message: String,
         workspaceId: String?,
         attachments: [MessageAttachment]? = nil,
+        model: String? = nil,
+        mode: ChatMode? = nil,
         onEvent: @escaping (MessageStreamEvent) -> Void
     ) async throws {
         guard let url = URL(string: "\(serverUrl)/api/conversations/\(conversationId)/messages") else {
@@ -560,6 +583,12 @@ class APIService {
             if let attachmentsArray = try? JSONSerialization.jsonObject(with: attachmentsData) {
                 bodyDict["attachments"] = attachmentsArray
             }
+        }
+        if let model = model {
+            bodyDict["model"] = model
+        }
+        if let mode = mode {
+            bodyDict["mode"] = mode.rawValue
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: bodyDict)
         
@@ -742,12 +771,21 @@ class APIService {
     }
     
     /// Create a new conversation, optionally within a specific project/workspace
-    /// - Parameter workspaceId: The workspace/project ID to create the conversation in. Use nil or "global" for global conversations.
+    /// - Parameters:
+    ///   - workspaceId: The workspace/project ID to create the conversation in. Use nil or "global" for global conversations.
+    ///   - model: The AI model to use (e.g., "sonnet-4.5", "gpt-5.2"). Pass nil for default.
+    ///   - mode: The execution mode (agent, plan, ask). Defaults to agent.
     /// - Returns: The ID of the newly created conversation
-    func createConversation(workspaceId: String? = nil) async throws -> String {
+    func createConversation(workspaceId: String? = nil, model: String? = nil, mode: ChatMode? = nil) async throws -> String {
         var bodyDict: [String: Any] = [:]
         if let workspaceId = workspaceId, workspaceId != "global" {
             bodyDict["workspaceId"] = workspaceId
+        }
+        if let model = model {
+            bodyDict["model"] = model
+        }
+        if let mode = mode {
+            bodyDict["mode"] = mode.rawValue
         }
         
         let body = try JSONSerialization.data(withJSONObject: bodyDict)

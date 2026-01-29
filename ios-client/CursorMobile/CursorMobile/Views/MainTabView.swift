@@ -11,6 +11,9 @@ struct MainTabView: View {
     // New chat state
     @State private var isCreatingChat = false
     @State private var newChatId: String?
+    @State private var newChatModelId: String?
+    @State private var newChatMode: ChatMode = .agent
+    @State private var showNewChatSheet = false
     
     // Drawer width
     private let drawerWidth: CGFloat = 280
@@ -124,10 +127,8 @@ struct MainTabView: View {
             HStack(alignment: .bottom, spacing: 12) {
                 FloatingTabBar(selectedTab: $selectedTab)
                 FloatingActionButton {
-                    createNewChat(for: project)
+                    showNewChatSheet = true
                 }
-                .opacity(isCreatingChat ? 0.5 : 1.0)
-                .disabled(isCreatingChat)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
@@ -208,8 +209,18 @@ struct MainTabView: View {
                             isReadOnly: false,
                             readOnlyReason: nil,
                             canFork: false
-                        )
+                        ),
+                        initialModelId: newChatModelId,
+                        initialMode: newChatMode
                     )
+                }
+                .sheet(isPresented: $showNewChatSheet) {
+                    NewChatSheet(project: project) { chatId, initialMessage, modelId, mode in
+                        newChatModelId = modelId
+                        newChatMode = mode
+                        selectedTab = 3  // Switch to chat tab
+                        newChatId = chatId
+                    }
                 }
         }
     }

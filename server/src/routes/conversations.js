@@ -304,7 +304,17 @@ router.get('/search/:query', async (req, res) => {
 // Create a new conversation
 router.post('/', async (req, res) => {
   try {
-    const { workspaceId } = req.body;
+    const { workspaceId, model, mode } = req.body;
+    
+    // Validate mode if provided
+    const validModes = ['agent', 'plan', 'ask'];
+    if (mode && !validModes.includes(mode)) {
+      return res.status(400).json({
+        error: 'Invalid mode',
+        details: `Mode must be one of: ${validModes.join(', ')}`,
+        validModes
+      });
+    }
     
     // Get workspace details
     let workspacePath = null;
@@ -325,6 +335,7 @@ router.post('/', async (req, res) => {
     if (workspacePath) {
       args.push('--workspace', workspacePath);
     }
+    // Note: create-chat doesn't support --model, but we store it for later use
     
     const result = await new Promise((resolve, reject) => {
       const process = spawn('cursor-agent', args);
@@ -354,19 +365,23 @@ router.post('/', async (req, res) => {
     
     const chatId = result;
     
-    // Save conversation to mobile store for persistence
+    // Save conversation to mobile store for persistence (including model/mode)
     await mobileChatStore.upsertConversation(chatId, {
       type: 'chat',
       workspaceId: workspaceId || 'global',
       workspaceFolder,
-      projectName
+      projectName,
+      model: model || null,
+      mode: mode || 'agent'
     });
     
-    console.log(`Created conversation ${chatId} and saved to mobile store`);
+    console.log(`Created conversation ${chatId} with model=${model || 'default'}, mode=${mode || 'agent'}`);
     
     res.json({ 
       chatId,
-      success: true
+      success: true,
+      model: model || null,
+      mode: mode || 'agent'
     });
   } catch (error) {
     console.error('Error creating conversation:', error);
@@ -387,7 +402,17 @@ router.post('/:conversationId/messages', async (req, res) => {
   
   try {
     const { conversationId } = req.params;
-    const { message, workspaceId, allowReadOnly, attachments } = req.body;
+    const { message, workspaceId, allowReadOnly, attachments, model, mode } = req.body;
+    
+    // Validate mode if provided
+    const validModes = ['agent', 'plan', 'ask'];
+    if (mode && !validModes.includes(mode)) {
+      return res.status(400).json({
+        error: 'Invalid mode',
+        details: `Mode must be one of: ${validModes.join(', ')}`,
+        validModes
+      });
+    }
     
     if (!message || message.trim() === '') {
       console.error('ERROR: Empty message');
@@ -431,13 +456,21 @@ router.post('/:conversationId/messages', async (req, res) => {
       }
     }
     
-    // Ensure conversation exists in mobile store
-    await mobileChatStore.upsertConversation(conversationId, {
+    // Ensure conversation exists in mobile store (update model/mode if provided)
+    const conversationUpdate = {
       type: 'chat',
       workspaceId: workspaceId || 'global',
       workspaceFolder,
       projectName
-    });
+    };
+    // Only update model/mode if explicitly provided in this request
+    if (model) {
+      conversationUpdate.model = model;
+    }
+    if (mode) {
+      conversationUpdate.mode = mode;
+    }
+    await mobileChatStore.upsertConversation(conversationId, conversationUpdate);
     
     // Save the user message to mobile store immediately
     const userMessageId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -500,6 +533,18 @@ router.post('/:conversationId/messages', async (req, res) => {
     
     if (workspacePath) {
       args.splice(2, 0, '--workspace', workspacePath);
+    }
+    
+    // Add model flag if specified
+    if (model) {
+      args.splice(2, 0, '--model', model);
+      console.log('Using model:', model);
+    }
+    
+    // Add mode flag if specified (plan or ask - agent is default)
+    if (mode && mode !== 'agent') {
+      args.splice(2, 0, '--mode', mode);
+      console.log('Using mode:', mode);
     }
     
     console.log('Spawning cursor-agent with args:', JSON.stringify(args));

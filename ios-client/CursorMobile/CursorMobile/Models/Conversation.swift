@@ -307,6 +307,49 @@ struct MessagesResponse: Codable {
 struct CreateConversationResponse: Codable {
     let chatId: String
     let success: Bool
+    let model: String?
+    let mode: String?
+}
+
+// MARK: - AI Models Response
+
+/// Response from GET /api/system/models
+struct ModelsResponse: Codable {
+    let models: [AIModel]
+    let cached: Bool?
+}
+
+/// AI model available for chat (fetched from server)
+struct AIModel: Codable, Identifiable, Hashable {
+    let id: String      // e.g., "sonnet-4.5"
+    let name: String    // e.g., "Claude 4.5 Sonnet"
+    let isDefault: Bool
+    let isCurrent: Bool
+}
+
+/// Chat execution mode (hardcoded - fixed CLI options)
+enum ChatMode: String, CaseIterable, Identifiable, Codable {
+    case agent = "agent"
+    case plan = "plan"
+    case ask = "ask"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .agent: return "Agent"
+        case .plan: return "Plan"
+        case .ask: return "Ask"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .agent: return "Full agent with file editing"
+        case .plan: return "Read-only planning mode"
+        case .ask: return "Q&A style explanations"
+        }
+    }
 }
 
 struct ForkConversationResponse: Codable {

@@ -585,6 +585,103 @@ router.get('/ios-simulators', async (req, res) => {
   }
 });
 
+// Cache for models list (models don't change often)
+let modelsCache = null;
+let modelsCacheTime = 0;
+const MODELS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * GET /api/system/models
+ * Get available AI models from cursor-agent
+ * Returns: { models: [{ id, name, isDefault, isCurrent }] }
+ */
+router.get('/models', async (req, res) => {
+  try {
+    // Check cache first
+    const now = Date.now();
+    if (modelsCache && (now - modelsCacheTime) < MODELS_CACHE_TTL) {
+      return res.json({ models: modelsCache, cached: true });
+    }
+    
+    // Execute cursor-agent --list-models
+    let stdout;
+    try {
+      const result = await execAsync('cursor-agent --list-models', {
+        timeout: 30000
+      });
+      stdout = result.stdout;
+    } catch (cmdError) {
+      // Check if cursor-agent is available
+      console.error('[Models] cursor-agent command failed:', cmdError.message);
+      return res.status(500).json({
+        error: 'Failed to get models',
+        details: 'cursor-agent CLI not available or command failed',
+        code: 'CURSOR_AGENT_ERROR'
+      });
+    }
+    
+    // Parse the output
+    // Format: "id - display name  (default)  (current)"
+    // Example:
+    // Available models
+    // 
+    // auto - Auto
+    // sonnet-4.5 - Claude 4.5 Sonnet  (current)
+    // opus-4.5-thinking - Claude 4.5 Opus (Thinking)  (default)
+    
+    const models = [];
+    const lines = stdout.split('\n');
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Skip empty lines and header
+      if (!trimmed || trimmed.startsWith('Available models') || trimmed.startsWith('Tip:')) {
+        continue;
+      }
+      
+      // Parse: "id - name  (default)  (current)"
+      // Note: ID can contain hyphens (e.g., gpt-5.2-codex), so we split on " - " (space-hyphen-space)
+      const separatorIndex = trimmed.indexOf(' - ');
+      if (separatorIndex === -1) {
+        continue;
+      }
+      
+      const id = trimmed.substring(0, separatorIndex);
+      const rest = trimmed.substring(separatorIndex + 3); // Skip " - "
+      
+      // Clean up the name - remove (default) and (current) markers
+      let name = rest.replace(/\s*\(default\)\s*/g, '').replace(/\s*\(current\)\s*/g, '').trim();
+      const isDefault = trimmed.includes('(default)');
+      const isCurrent = trimmed.includes('(current)');
+      
+      if (id && name) {
+        models.push({
+          id,
+          name,
+          isDefault,
+          isCurrent
+        });
+      }
+    }
+    
+    // Update cache
+    modelsCache = models;
+    modelsCacheTime = now;
+    
+    console.log(`[Models] Fetched ${models.length} models from cursor-agent`);
+    
+    res.json({ models, cached: false });
+    
+  } catch (error) {
+    console.error('[Models] Error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch models',
+      details: error.message
+    });
+  }
+});
+
 // Execute a terminal command (with safety checks)
 router.post('/exec', async (req, res) => {
   try {

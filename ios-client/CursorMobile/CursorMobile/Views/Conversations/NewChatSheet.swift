@@ -9,10 +9,25 @@ struct NewChatSheet: View {
     @State private var isCreating = false
     @State private var error: String?
     
+    // Model and mode selection
+    @State private var availableModels: [AIModel] = []
+    @State private var isLoadingModels = true
+    @State private var selectedModelId: String? = nil
+    @State private var selectedMode: ChatMode = .agent
+    @State private var showOptions = false
+    
     @FocusState private var isMessageFocused: Bool
     
     let project: Project
-    let onChatCreated: (String, String) -> Void  // (chatId, initialMessage)
+    let onChatCreated: (String, String, String?, ChatMode) -> Void  // (chatId, initialMessage, model, mode)
+    
+    /// Selected model object based on selectedModelId
+    private var selectedModel: AIModel? {
+        if let id = selectedModelId {
+            return availableModels.first { $0.id == id }
+        }
+        return availableModels.first { $0.isCurrent } ?? availableModels.first { $0.isDefault } ?? availableModels.first
+    }
     
     var body: some View {
         NavigationStack {
@@ -37,6 +52,102 @@ struct NewChatSheet: View {
                     .padding(.horizontal)
                     .padding(.bottom, 8)
                     .background(Color(.systemBackground))
+                }
+                
+                Divider()
+                
+                // Options section (collapsible)
+                VStack(spacing: 0) {
+                    // Options header
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showOptions.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "gearshape")
+                                .foregroundColor(.secondary)
+                            Text("Options")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Image(systemName: showOptions ? "chevron.up" : "chevron.down")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
+                        .background(Color(.secondarySystemBackground))
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Options content (when expanded)
+                    if showOptions {
+                        VStack(spacing: 12) {
+                            // Model picker
+                            HStack {
+                                Text("Model")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                if isLoadingModels {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Menu {
+                                        ForEach(availableModels) { model in
+                                            Button {
+                                                selectedModelId = model.id
+                                            } label: {
+                                                HStack {
+                                                    Text(model.name)
+                                                    if model.isDefault {
+                                                        Text("(default)")
+                                                            .foregroundColor(.secondary)
+                                                    }
+                                                    if model.isCurrent {
+                                                        Text("(current)")
+                                                            .foregroundColor(.secondary)
+                                                    }
+                                                    if selectedModelId == model.id || (selectedModelId == nil && model == selectedModel) {
+                                                        Image(systemName: "checkmark")
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text(selectedModel?.name ?? "Select Model")
+                                                .font(.subheadline)
+                                            Image(systemName: "chevron.up.chevron.down")
+                                                .font(.caption2)
+                                        }
+                                        .foregroundColor(.primary)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                            
+                            // Mode picker (segmented)
+                            HStack {
+                                Text("Mode")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Picker("Mode", selection: $selectedMode) {
+                                    ForEach(ChatMode.allCases) { mode in
+                                        Text(mode.displayName).tag(mode)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .fixedSize()
+                            }
+                            .padding(.horizontal)
+                        }
+                        .padding(.vertical, 12)
+                        .background(Color(.secondarySystemBackground))
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
                 
                 Divider()
@@ -79,6 +190,38 @@ struct NewChatSheet: View {
         }
         .onAppear {
             isMessageFocused = true
+            loadModels()
+        }
+    }
+    
+    private func loadModels() {
+        Task {
+            guard let api = authManager.createAPIService() else {
+                await MainActor.run {
+                    isLoadingModels = false
+                }
+                return
+            }
+            
+            do {
+                let models = try await api.getAvailableModels()
+                await MainActor.run {
+                    availableModels = models
+                    // Set initial selection to current or default model
+                    if let current = models.first(where: { $0.isCurrent }) {
+                        selectedModelId = current.id
+                    } else if let defaultModel = models.first(where: { $0.isDefault }) {
+                        selectedModelId = defaultModel.id
+                    }
+                    isLoadingModels = false
+                }
+            } catch {
+                await MainActor.run {
+                    // Silently fail - user can still create chat without model selection
+                    isLoadingModels = false
+                    print("[NewChatSheet] Failed to load models: \(error)")
+                }
+            }
         }
     }
     
@@ -99,14 +242,18 @@ struct NewChatSheet: View {
             }
             
             do {
-                // Create the conversation
-                let chatId = try await api.createConversation(workspaceId: project.id)
+                // Create the conversation with model and mode
+                let chatId = try await api.createConversation(
+                    workspaceId: project.id,
+                    model: selectedModelId,
+                    mode: selectedMode
+                )
                 
                 await MainActor.run {
                     isCreating = false
                     dismiss()
-                    // Pass both chatId and the initial message to be sent
-                    onChatCreated(chatId, trimmedMessage)
+                    // Pass chatId, initial message, model, and mode
+                    onChatCreated(chatId, trimmedMessage, selectedModelId, selectedMode)
                 }
             } catch {
                 await MainActor.run {
@@ -126,7 +273,7 @@ struct NewChatSheet: View {
             path: "/path/to/project",
             lastOpened: Date()
         ),
-        onChatCreated: { _, _ in }
+        onChatCreated: { _, _, _, _ in }
     )
     .environmentObject(AuthManager())
 }

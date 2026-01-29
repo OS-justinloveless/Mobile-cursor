@@ -11,8 +11,11 @@ struct ProjectConversationsView: View {
     @State private var selectedConversation: Conversation?
     @State private var isCreatingChat = false
     @State private var newChatId: String?
+    @State private var newChatModelId: String?
+    @State private var newChatMode: ChatMode = .agent
     @State private var searchText = ""
     @State private var hideReadOnly = false
+    @State private var showNewChatSheet = false
     
     /// Conversations filtered to exclude empty ones (0 messages) and apply search/filter
     private var filteredConversations: [Conversation] {
@@ -84,21 +87,34 @@ struct ProjectConversationsView: View {
         .navigationDestination(item: $newChatId) { chatId in
             // Navigate to the new chat using a temporary Conversation object
             // New chats from mobile are editable (not read-only)
-            ConversationDetailView(conversation: Conversation(
-                id: chatId,
-                type: "chat",
-                title: "New Chat",
-                timestamp: Date().timeIntervalSince1970 * 1000,
-                messageCount: 0,
-                workspaceId: project.id,
-                source: "mobile",
-                projectName: project.name,
-                workspaceFolder: project.path,
-                isProjectChat: true,
-                isReadOnly: false,
-                readOnlyReason: nil,
-                canFork: false
-            ))
+            ConversationDetailView(
+                conversation: Conversation(
+                    id: chatId,
+                    type: "chat",
+                    title: "New Chat",
+                    timestamp: Date().timeIntervalSince1970 * 1000,
+                    messageCount: 0,
+                    workspaceId: project.id,
+                    source: "mobile",
+                    projectName: project.name,
+                    workspaceFolder: project.path,
+                    isProjectChat: true,
+                    isReadOnly: false,
+                    readOnlyReason: nil,
+                    canFork: false
+                ),
+                initialModelId: newChatModelId,
+                initialMode: newChatMode
+            )
+        }
+        .sheet(isPresented: $showNewChatSheet) {
+            NewChatSheet(project: project) { chatId, initialMessage, modelId, mode in
+                newChatModelId = modelId
+                newChatMode = mode
+                newChatId = chatId
+                // Note: initialMessage will be sent automatically when the view appears
+                // TODO: Pass initialMessage to ConversationDetailView to send on appear
+            }
         }
         .onAppear {
             if conversations.isEmpty {
@@ -119,16 +135,10 @@ struct ProjectConversationsView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 12) {
                     Button {
-                        createNewChat()
+                        showNewChatSheet = true
                     } label: {
-                        if isCreatingChat {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle())
-                        } else {
-                            Image(systemName: "plus.bubble")
-                        }
+                        Image(systemName: "plus.bubble")
                     }
-                    .disabled(isCreatingChat)
                     
                     Button {
                         loadConversations()

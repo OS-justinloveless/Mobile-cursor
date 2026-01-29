@@ -43,6 +43,7 @@
 		F000000000000017 /* FileViewerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000017 /* FileViewerSheet.swift */; };
 		F000000000000039 /* FileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000039 /* FileComponents.swift */; };
 		F000000000000018 /* ConversationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000018 /* ConversationsView.swift */; };
+		F000000000000060 /* NewChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000060 /* NewChatSheet.swift */; };
 		F000000000000019 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000019 /* SettingsView.swift */; };
 		F000000000000020 /* CommonViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000020 /* CommonViews.swift */; };
 		F000000000000038 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000038 /* ImagePicker.swift */; };
@@ -99,6 +100,7 @@
 		F100000000000017 /* FileViewerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileViewerSheet.swift; sourceTree = "<group>"; };
 		F100000000000039 /* FileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileComponents.swift; sourceTree = "<group>"; };
 		F100000000000018 /* ConversationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationsView.swift; sourceTree = "<group>"; };
+		F100000000000060 /* NewChatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewChatSheet.swift; sourceTree = "<group>"; };
 		F100000000000019 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F100000000000020 /* CommonViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonViews.swift; sourceTree = "<group>"; };
 		F100000000000038 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
@@ -297,6 +299,7 @@
 			isa = PBXGroup;
 			children = (
 				F100000000000018 /* ConversationsView.swift */,
+				F100000000000060 /* NewChatSheet.swift */,
 			);
 			path = Conversations;
 			sourceTree = "<group>";
@@ -436,6 +439,7 @@
 			F000000000000017 /* FileViewerSheet.swift in Sources */,
 			F000000000000039 /* FileComponents.swift in Sources */,
 			F000000000000018 /* ConversationsView.swift in Sources */,
+			F000000000000060 /* NewChatSheet.swift in Sources */,
 			F000000000000019 /* SettingsView.swift in Sources */,
 			F000000000000020 /* CommonViews.swift in Sources */,
 			F000000000000038 /* ImagePicker.swift in Sources */,
