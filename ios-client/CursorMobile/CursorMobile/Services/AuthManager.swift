@@ -5,11 +5,13 @@ import SwiftUI
 class AuthManager: ObservableObject {
     @Published var token: String?
     @Published var serverUrl: String?
+    @Published var hostname: String?  // Current connected host's name
     @Published var isAuthenticated = false
     @Published var isLoading = true
     @Published var error: String?
     
     private let storageKey = "cursor-mobile-auth"
+    private let savedHostsManager = SavedHostsManager.shared
     
     init() {
         loadStoredCredentials()
@@ -20,6 +22,7 @@ class AuthManager: ObservableObject {
            let credentials = try? JSONDecoder().decode(StoredCredentials.self, from: data) {
             self.token = credentials.token
             self.serverUrl = credentials.serverUrl
+            self.hostname = credentials.hostname
             
             // Validate stored credentials
             Task {
@@ -64,14 +67,22 @@ class AuthManager: ObservableObject {
         
         do {
             let apiService = APIService(serverUrl: normalizedUrl, token: token)
-            _ = try await apiService.getSystemInfo()
+            let systemInfo = try await apiService.getSystemInfo()
             
             // Success - save credentials
             self.token = token
             self.serverUrl = normalizedUrl
+            self.hostname = systemInfo.hostname
             self.isAuthenticated = true
             
             saveCredentials()
+            
+            // Save to saved hosts for reconnection
+            savedHostsManager.saveHost(
+                name: systemInfo.hostname,
+                serverUrl: normalizedUrl,
+                token: token
+            )
         } catch let error as APIError {
             self.error = error.localizedDescription
         } catch {
@@ -82,6 +93,7 @@ class AuthManager: ObservableObject {
     func logout() {
         token = nil
         serverUrl = nil
+        hostname = nil
         isAuthenticated = false
         error = nil
         
@@ -94,7 +106,7 @@ class AuthManager: ObservableObject {
     private func saveCredentials() {
         guard let token = token, let serverUrl = serverUrl else { return }
         
-        let credentials = StoredCredentials(token: token, serverUrl: serverUrl)
+        let credentials = StoredCredentials(token: token, serverUrl: serverUrl, hostname: hostname)
         if let data = try? JSONEncoder().encode(credentials) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
@@ -109,4 +121,5 @@ class AuthManager: ObservableObject {
 private struct StoredCredentials: Codable {
     let token: String
     let serverUrl: String
+    let hostname: String?  // Optional for backward compatibility
 }

@@ -11,7 +11,6 @@ struct ProjectSelectionDrawer: View {
     @State private var error: String?
     @State private var openingProject: String?
     @State private var showSettings = false
-    @State private var showLogoutConfirmation = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -99,19 +98,6 @@ struct ProjectSelectionDrawer: View {
                     }
             }
         }
-        .confirmationDialog(
-            "Disconnect from server?",
-            isPresented: $showLogoutConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Disconnect", role: .destructive) {
-                webSocketManager.disconnect()
-                authManager.logout()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("You will need to scan the QR code again to reconnect.")
-        }
     }
     
     private var drawerBottomButtons: some View {
@@ -119,9 +105,10 @@ struct ProjectSelectionDrawer: View {
             Divider()
             
             HStack(spacing: 16) {
-                // Sign Out button
+                // Disconnect button
                 Button {
-                    showLogoutConfirmation = true
+                    webSocketManager.disconnect()
+                    authManager.logout()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
