@@ -26,6 +26,9 @@ const __dirname = path.dirname(__filename);
  *       workspaceId: string,
  *       workspaceFolder: string | null,
  *       projectName: string | null,
+ *       tool: 'cursor-agent' | 'claude' | 'gemini',
+ *       model: string | null,
+ *       mode: 'agent' | 'plan' | 'ask',
  *       createdAt: number,
  *       updatedAt: number,
  *       source: 'mobile'
@@ -136,10 +139,24 @@ export class MobileChatStore {
    */
   async upsertConversation(chatId, conversationData) {
     await this.init();
-    
+
     const existing = this.data.conversations[chatId];
     const now = Date.now();
-    
+
+    // Validate tool if provided
+    const validTools = ['cursor-agent', 'claude', 'gemini'];
+    const tool = conversationData.tool || existing?.tool || 'cursor-agent';
+    if (!validTools.includes(tool)) {
+      throw new Error(`Invalid tool: ${tool}. Must be one of: ${validTools.join(', ')}`);
+    }
+
+    // Validate mode if provided
+    const validModes = ['agent', 'plan', 'ask'];
+    const mode = conversationData.mode || existing?.mode || 'agent';
+    if (mode && !validModes.includes(mode)) {
+      throw new Error(`Invalid mode: ${mode}. Must be one of: ${validModes.join(', ')}`);
+    }
+
     this.data.conversations[chatId] = {
       id: chatId,
       title: conversationData.title || existing?.title || `Chat ${chatId.slice(0, 8)}`,
@@ -147,12 +164,15 @@ export class MobileChatStore {
       workspaceId: conversationData.workspaceId || existing?.workspaceId || 'global',
       workspaceFolder: conversationData.workspaceFolder || existing?.workspaceFolder || null,
       projectName: conversationData.projectName || existing?.projectName || null,
+      tool,
+      model: conversationData.model !== undefined ? conversationData.model : (existing?.model || null),
+      mode,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       messageCount: this.data.messages[chatId]?.length || 0,
       source: 'mobile'
     };
-    
+
     await this.save();
     return this.data.conversations[chatId];
   }

@@ -775,8 +775,9 @@ class APIService {
     ///   - workspaceId: The workspace/project ID to create the conversation in. Use nil or "global" for global conversations.
     ///   - model: The AI model to use (e.g., "sonnet-4.5", "gpt-5.2"). Pass nil for default.
     ///   - mode: The execution mode (agent, plan, ask). Defaults to agent.
+    ///   - tool: The AI CLI tool to use (cursor-agent, claude, gemini). Defaults to cursor-agent.
     /// - Returns: The ID of the newly created conversation
-    func createConversation(workspaceId: String? = nil, model: String? = nil, mode: ChatMode? = nil) async throws -> String {
+    func createConversation(workspaceId: String? = nil, model: String? = nil, mode: ChatMode? = nil, tool: String = "cursor-agent") async throws -> String {
         var bodyDict: [String: Any] = [:]
         if let workspaceId = workspaceId, workspaceId != "global" {
             bodyDict["workspaceId"] = workspaceId
@@ -787,10 +788,11 @@ class APIService {
         if let mode = mode {
             bodyDict["mode"] = mode.rawValue
         }
-        
+        bodyDict["tool"] = tool
+
         let body = try JSONSerialization.data(withJSONObject: bodyDict)
         let data = try await makeRequest(endpoint: "/api/conversations", method: "POST", body: body)
-        
+
         do {
             let response = try decoder.decode(CreateConversationResponse.self, from: data)
             return response.chatId
@@ -799,6 +801,34 @@ class APIService {
         }
     }
     
+    /// Get tool availability status from the server
+    /// - Returns: Dictionary mapping tool to availability (true if installed, false otherwise)
+    func getToolAvailability() async throws -> [ChatTool: Bool] {
+        let data = try await makeRequest(endpoint: "/api/conversations/tools/availability")
+
+        do {
+            struct ToolAvailabilityResponse: Codable {
+                struct ToolInfo: Codable {
+                    let available: Bool
+                    let displayName: String
+                    let installInstructions: String
+                }
+                let tools: [String: ToolInfo]
+            }
+
+            let response = try decoder.decode(ToolAvailabilityResponse.self, from: data)
+            var availability: [ChatTool: Bool] = [:]
+
+            for tool in ChatTool.allCases {
+                availability[tool] = response.tools[tool.rawValue]?.available ?? false
+            }
+
+            return availability
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+
     /// Fork a read-only Cursor IDE conversation to create an editable mobile copy
     /// - Parameters:
     ///   - id: The ID of the conversation to fork

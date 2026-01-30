@@ -285,7 +285,7 @@ private fun ConversationCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    
+
                     conversation.estimatedTokens?.let { tokens ->
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
@@ -294,13 +294,30 @@ private fun ConversationCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    
+
                     if (conversation.isReadOnlyConversation) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "• Cursor IDE",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Tool badge
+                conversation.chatTool?.let { tool ->
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = tool.getColor().copy(alpha = 0.2f),
+                        modifier = Modifier.wrapContentSize()
+                    ) {
+                        Text(
+                            text = tool.displayName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tool.getColor(),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
@@ -330,10 +347,11 @@ private fun NewChatSheet(
     onChatCreated: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    var selectedTool by remember { mutableStateOf(ChatTool.CURSOR_AGENT) }
     var selectedMode by remember { mutableStateOf(ChatMode.AGENT) }
     var isCreating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    
+
     fun createChat() {
         scope.launch {
             isCreating = true
@@ -343,7 +361,8 @@ private fun NewChatSheet(
                 if (api != null) {
                     val body = mapOf(
                         "workspaceId" to project.id,
-                        "mode" to selectedMode.value
+                        "mode" to selectedMode.value,
+                        "tool" to selectedTool.value
                     )
                     val response = api.createConversation(body)
                     onChatCreated(response.chatId)
@@ -377,14 +396,55 @@ private fun NewChatSheet(
             )
             
             Spacer(modifier = Modifier.height(24.dp))
-            
+
+            // Tool selection
+            Text(
+                text = "Tool",
+                style = MaterialTheme.typography.titleSmall
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            ChatTool.entries.forEach { tool ->
+                val isSelected = selectedTool == tool
+
+                Surface(
+                    onClick = { selectedTool = tool },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surface,
+                    border = if (isSelected) null
+                             else ButtonDefaults.outlinedButtonBorder
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = isSelected,
+                            onClick = { selectedTool = tool }
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = tool.displayName,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             Text(
                 text = "Mode",
                 style = MaterialTheme.typography.titleSmall
             )
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             ChatMode.entries.forEach { mode ->
                 val isSelected = selectedMode == mode
                 

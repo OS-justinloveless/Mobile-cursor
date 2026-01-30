@@ -1,6 +1,24 @@
 package com.cursormobile.app.data.models
 
+import androidx.compose.ui.graphics.Color
 import java.util.Date
+
+/// AI CLI tool that created/manages this conversation
+enum class ChatTool(val value: String, val displayName: String) {
+    CURSOR_AGENT("cursor-agent", "Cursor Agent"),
+    CLAUDE("claude", "Claude Code"),
+    GEMINI("gemini", "Google Gemini");
+
+    fun getColor(): Color = when (this) {
+        CURSOR_AGENT -> Color(0xFF0066FF) // Blue
+        CLAUDE -> Color(0xFF9C27B0) // Purple
+        GEMINI -> Color(0xFFFF9800) // Orange
+    }
+
+    companion object {
+        fun fromValue(value: String): ChatTool? = entries.find { it.value == value }
+    }
+}
 
 data class Conversation(
     val id: String,
@@ -13,11 +31,13 @@ data class Conversation(
     val projectName: String? = null,
     val workspaceFolder: String? = null,
     val isProjectChat: Boolean? = null,
+    val tool: String? = null,
     val isReadOnly: Boolean? = null,
     val readOnlyReason: String? = null,
     val canFork: Boolean? = null,
     val estimatedTokens: Int? = null
 ) {
+    val chatTool: ChatTool? get() = tool?.let { ChatTool.fromValue(it) }
     val displayName: String get() = projectName ?: "Global"
     val lastModified: Date get() = Date((timestamp).toLong())
     val isGlobalChat: Boolean get() = !(isProjectChat ?: true)
@@ -161,6 +181,7 @@ data class MessagesResponse(
 data class CreateConversationResponse(
     val chatId: String,
     val success: Boolean,
+    val tool: String? = null,
     val model: String? = null,
     val mode: String? = null
 )

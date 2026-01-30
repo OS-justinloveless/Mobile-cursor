@@ -15,9 +15,14 @@ struct NewChatSheet: View {
     @State private var selectedModelId: String? = nil
     @State private var selectedMode: ChatMode
     @State private var showOptions = false
-    
+
+    // Tool selection
+    @State private var selectedTool: ChatTool = .cursorAgent
+    @State private var toolAvailability: [ChatTool: Bool] = [:]
+    @State private var isLoadingTools = true
+
     @FocusState private var isMessageFocused: Bool
-    
+
     let project: Project
     let onChatCreated: (String, String, String?, ChatMode) -> Void  // (chatId, initialMessage, model, mode)
     
@@ -93,6 +98,53 @@ struct NewChatSheet: View {
                     // Options content (when expanded)
                     if showOptions {
                         VStack(spacing: 12) {
+                            // Tool picker
+                            HStack {
+                                Text("Tool")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                if isLoadingTools {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Menu {
+                                        ForEach(ChatTool.allCases) { tool in
+                                            Button {
+                                                if toolAvailability[tool] != false {
+                                                    selectedTool = tool
+                                                }
+                                            } label: {
+                                                HStack {
+                                                    Image(systemName: tool.icon)
+                                                    Text(tool.displayName)
+                                                    if toolAvailability[tool] == false {
+                                                        Text("(unavailable)")
+                                                            .foregroundColor(.secondary)
+                                                    }
+                                                    if selectedTool == tool {
+                                                        Image(systemName: "checkmark")
+                                                    }
+                                                }
+                                            }
+                                            .disabled(toolAvailability[tool] == false)
+                                        }
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: selectedTool.icon)
+                                                .font(.caption)
+                                                .foregroundColor(selectedTool.color)
+                                            Text(selectedTool.displayName)
+                                                .font(.subheadline)
+                                            Image(systemName: "chevron.up.chevron.down")
+                                                .font(.caption2)
+                                        }
+                                        .foregroundColor(.primary)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+
                             // Model picker
                             HStack {
                                 Text("Model")
@@ -136,7 +188,7 @@ struct NewChatSheet: View {
                                 }
                             }
                             .padding(.horizontal)
-                            
+
                             // Mode picker (segmented)
                             HStack {
                                 Text("Mode")
@@ -200,9 +252,41 @@ struct NewChatSheet: View {
         .onAppear {
             isMessageFocused = true
             loadModels()
+            loadToolAvailability()
         }
     }
-    
+
+    private func loadToolAvailability() {
+        Task {
+            guard let api = authManager.createAPIService() else {
+                await MainActor.run {
+                    isLoadingTools = false
+                }
+                return
+            }
+
+            do {
+                let availability = try await api.getToolAvailability()
+                await MainActor.run {
+                    toolAvailability = availability
+                    // If current selection is unavailable, switch to first available tool
+                    if toolAvailability[selectedTool] == false {
+                        if let firstAvailable = ChatTool.allCases.first(where: { toolAvailability[$0] != false }) {
+                            selectedTool = firstAvailable
+                        }
+                    }
+                    isLoadingTools = false
+                }
+            } catch {
+                await MainActor.run {
+                    // Default to cursor-agent if we can't check availability
+                    isLoadingTools = false
+                    print("[NewChatSheet] Failed to load tool availability: \(error)")
+                }
+            }
+        }
+    }
+
     private func loadModels() {
         Task {
             guard let api = authManager.createAPIService() else {
@@ -256,11 +340,12 @@ struct NewChatSheet: View {
             }
             
             do {
-                // Create the conversation with model and mode
+                // Create the conversation with tool, model, and mode
                 let chatId = try await api.createConversation(
                     workspaceId: project.id,
                     model: selectedModelId,
-                    mode: selectedMode
+                    mode: selectedMode,
+                    tool: selectedTool.rawValue
                 )
                 
                 await MainActor.run {

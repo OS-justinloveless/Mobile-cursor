@@ -99,6 +99,7 @@ struct ProjectConversationsView: View {
                     projectName: project.name,
                     workspaceFolder: project.path,
                     isProjectChat: true,
+                    tool: nil,
                     isReadOnly: false,
                     readOnlyReason: nil,
                     canFork: false

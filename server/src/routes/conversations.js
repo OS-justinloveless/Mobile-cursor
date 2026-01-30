@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { CursorChatReader } from '../utils/CursorChatReader.js';
 import { CursorWorkspace } from '../utils/CursorWorkspace.js';
 import { MobileChatStore } from '../utils/MobileChatStore.js';
+import { getCLIAdapter, getSupportedTools, checkAllToolsAvailability } from '../utils/CLIAdapter.js';
 
 const router = Router();
 const chatReader = new CursorChatReader();
@@ -56,30 +57,45 @@ function enrichConversationForMobile(chat) {
 router.get('/', async (req, res) => {
   try {
     const { type, search } = req.query;
-    
+
     let chats;
-    
+
     if (search) {
       chats = await chatReader.searchChats(search);
     } else {
       chats = await chatReader.getAllChats();
     }
-    
+
     // Filter by type if specified
     if (type && (type === 'chat' || type === 'composer')) {
       chats = chats.filter(chat => chat.type === type);
     }
-    
+
+    // Filter out Cursor IDE chats - only show mobile-created chats
+    // This deprecates read-only Cursor IDE chats from the mobile UI
+    chats = chats.filter(chat => chat.source === 'mobile');
+
     // Enrich with mobile-specific metadata
     chats = chats.map(enrichConversationForMobile);
-    
-    res.json({ 
+
+    res.json({
       conversations: chats,
       total: chats.length
     });
   } catch (error) {
     console.error('Error fetching conversations:', error);
     res.status(500).json({ error: 'Failed to fetch conversations' });
+  }
+});
+
+// Get tool availability status
+router.get('/tools/availability', async (req, res) => {
+  try {
+    const availability = await checkAllToolsAvailability();
+    res.json({ tools: availability });
+  } catch (error) {
+    console.error('Error checking tool availability:', error);
+    res.status(500).json({ error: 'Failed to check tool availability' });
   }
 });
 
@@ -304,8 +320,18 @@ router.get('/search/:query', async (req, res) => {
 // Create a new conversation
 router.post('/', async (req, res) => {
   try {
-    const { workspaceId, model, mode } = req.body;
-    
+    const { workspaceId, model, mode, tool = 'cursor-agent' } = req.body;
+
+    // Validate tool
+    const validTools = getSupportedTools();
+    if (!validTools.includes(tool)) {
+      return res.status(400).json({
+        error: 'Invalid tool',
+        details: `Tool must be one of: ${validTools.join(', ')}`,
+        validTools
+      });
+    }
+
     // Validate mode if provided
     const validModes = ['agent', 'plan', 'ask'];
     if (mode && !validModes.includes(mode)) {
@@ -315,12 +341,24 @@ router.post('/', async (req, res) => {
         validModes
       });
     }
-    
+
+    // Get CLI adapter for the selected tool
+    const adapter = getCLIAdapter(tool);
+
+    // Check if CLI is installed
+    if (!await adapter.isAvailable()) {
+      return res.status(503).json({
+        error: `${adapter.getDisplayName()} CLI not found`,
+        details: adapter.getInstallInstructions(),
+        tool
+      });
+    }
+
     // Get workspace details
     let workspacePath = null;
     let projectName = null;
     let workspaceFolder = null;
-    
+
     if (workspaceId && workspaceId !== 'global') {
       const project = await workspaceManager.getProjectDetails(workspaceId);
       if (project) {
@@ -329,63 +367,71 @@ router.post('/', async (req, res) => {
         workspaceFolder = `file://${project.path}`;
       }
     }
-    
-    // Create a new chat using cursor-agent
-    const args = ['create-chat'];
-    if (workspacePath) {
-      args.push('--workspace', workspacePath);
+
+    // Build create chat command
+    const createArgs = adapter.buildCreateChatArgs({ workspacePath });
+    let chatId;
+
+    // Handle chat creation (CLI spawn or UUID generation)
+    if (createArgs.needsGeneratedId) {
+      // Tools like claude/gemini don't have explicit create command
+      chatId = crypto.randomUUID();
+      console.log(`Generated session ID for ${tool}: ${chatId}`);
+    } else {
+      // Tools like cursor-agent create chat via CLI
+      const result = await new Promise((resolve, reject) => {
+        const process = spawn(adapter.getExecutable(), createArgs);
+        let output = '';
+        let errorOutput = '';
+
+        process.stdout.on('data', (data) => {
+          output += data.toString();
+        });
+
+        process.stderr.on('data', (data) => {
+          errorOutput += data.toString();
+        });
+
+        process.on('close', (code) => {
+          if (code !== 0) {
+            reject(new Error(`${tool} failed: ${errorOutput}`));
+          } else {
+            resolve(output);
+          }
+        });
+
+        process.on('error', (err) => {
+          reject(err);
+        });
+      });
+
+      chatId = adapter.parseCreateChatOutput(result);
+      console.log(`Created chat via ${tool}: ${chatId}`);
     }
-    // Note: create-chat doesn't support --model, but we store it for later use
-    
-    const result = await new Promise((resolve, reject) => {
-      const process = spawn('cursor-agent', args);
-      let output = '';
-      let errorOutput = '';
-      
-      process.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-      
-      process.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-      });
-      
-      process.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`cursor-agent failed: ${errorOutput}`));
-        } else {
-          resolve(output.trim());
-        }
-      });
-      
-      process.on('error', (err) => {
-        reject(err);
-      });
-    });
-    
-    const chatId = result;
-    
-    // Save conversation to mobile store for persistence (including model/mode)
+
+    // Save conversation to mobile store for persistence
     await mobileChatStore.upsertConversation(chatId, {
       type: 'chat',
       workspaceId: workspaceId || 'global',
       workspaceFolder,
       projectName,
+      tool,
       model: model || null,
       mode: mode || 'agent'
     });
-    
-    console.log(`Created conversation ${chatId} with model=${model || 'default'}, mode=${mode || 'agent'}`);
-    
-    res.json({ 
+
+    console.log(`Created conversation ${chatId} with tool=${tool}, model=${model || 'default'}, mode=${mode || 'agent'}`);
+
+    res.json({
       chatId,
       success: true,
+      tool,
       model: model || null,
       mode: mode || 'agent'
     });
   } catch (error) {
     console.error('Error creating conversation:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to create conversation',
       details: error.message
     });
@@ -456,12 +502,29 @@ router.post('/:conversationId/messages', async (req, res) => {
       }
     }
     
+    // Get conversation from mobile store to check tool
+    const conversation = await mobileChatStore.getConversation(conversationId);
+    const tool = conversation?.tool || 'cursor-agent';
+
+    // Get CLI adapter for the tool
+    const adapter = getCLIAdapter(tool);
+
+    // Check if CLI is installed
+    if (!await adapter.isAvailable()) {
+      return res.status(503).json({
+        error: `${adapter.getDisplayName()} CLI not found`,
+        details: adapter.getInstallInstructions(),
+        tool
+      });
+    }
+
     // Ensure conversation exists in mobile store (update model/mode if provided)
     const conversationUpdate = {
       type: 'chat',
       workspaceId: workspaceId || 'global',
       workspaceFolder,
-      projectName
+      projectName,
+      tool
     };
     // Only update model/mode if explicitly provided in this request
     if (model) {
@@ -519,52 +582,21 @@ router.post('/:conversationId/messages', async (req, res) => {
     // Flush headers immediately
     res.flushHeaders();
     console.log('SSE headers set and flushed');
-    
-    // Build cursor-agent command
-    // Note: -f (force) flag is required to allow file edits in headless mode
-    // Without -f, cursor-agent rejects edit operations when --workspace is set
-    const args = [
-      '--resume', conversationId,
-      '-p',
-      '-f',
-      '--output-format', 'stream-json',
-      message
-    ];
-    
-    if (workspacePath) {
-      args.splice(2, 0, '--workspace', workspacePath);
-    }
-    
-    // Add model flag if specified
-    if (model) {
-      args.splice(2, 0, '--model', model);
-      console.log('Using model:', model);
-    }
-    
-    // Add mode flag if specified (plan or ask - agent is default)
-    if (mode && mode !== 'agent') {
-      args.splice(2, 0, '--mode', mode);
-      console.log('Using mode:', mode);
-    }
-    
-    console.log('Spawning cursor-agent with args:', JSON.stringify(args));
-    console.log('Full command:', `cursor-agent ${args.join(' ')}`);
-    
-    // Check if cursor-agent exists
-    try {
-      execSync('which cursor-agent', { stdio: 'pipe' });
-      console.log('cursor-agent found in PATH');
-    } catch (e) {
-      console.error('ERROR: cursor-agent not found in PATH');
-      return res.status(500).json({ 
-        error: 'cursor-agent CLI not found',
-        details: 'Please install cursor-agent: curl https://cursor.com/install -fsS | bash',
-        code: 'CURSOR_AGENT_NOT_FOUND'
-      });
-    }
-    
-    // Spawn cursor-agent process
-    const agent = spawn('cursor-agent', args, {
+
+    // Build CLI command using adapter
+    const args = adapter.buildSendMessageArgs({
+      chatId: conversationId,
+      message: message.trim(),
+      workspacePath,
+      model,
+      mode
+    });
+
+    console.log(`Spawning ${tool} with args:`, JSON.stringify(args));
+    console.log(`Full command: ${adapter.getExecutable()} ${args.join(' ')}`);
+
+    // Spawn CLI process
+    const agent = spawn(adapter.getExecutable(), args, {
       stdio: ['ignore', 'pipe', 'pipe']
     });
     let hasData = false;
@@ -641,7 +673,7 @@ router.post('/:conversationId/messages', async (req, res) => {
     agent.stderr.on('data', (data) => {
       const errorText = data.toString();
       errorOutput += errorText;
-      console.error('cursor-agent stderr:', errorText);
+      console.error(`${tool} stderr:`, errorText);
       // Send error as event
       res.write(`data: ${JSON.stringify({ type: 'stderr', content: errorText })}\n\n`);
     });
@@ -650,7 +682,7 @@ router.post('/:conversationId/messages', async (req, res) => {
     agent.on('close', async (code) => {
       clearInterval(keepAliveInterval);
       const duration = Date.now() - startTime;
-      console.log('cursor-agent closed');
+      console.log(`${tool} closed`);
       console.log('Exit code:', code);
       console.log('Duration:', duration + 'ms');
       console.log('Had data:', hasData);
@@ -704,18 +736,18 @@ router.post('/:conversationId/messages', async (req, res) => {
     // Handle errors
     agent.on('error', (err) => {
       clearInterval(keepAliveInterval);
-      console.error('cursor-agent spawn error:', err);
+      console.error(`${tool} spawn error:`, err);
       console.error('Error code:', err.code);
       console.error('Error message:', err.message);
-      
-      const errorMsg = err.code === 'ENOENT' 
-        ? 'cursor-agent command not found. Please install: curl https://cursor.com/install -fsS | bash'
+
+      const errorMsg = err.code === 'ENOENT'
+        ? `${adapter.getDisplayName()} command not found. ${adapter.getInstallInstructions()}`
         : err.message;
-      
-      res.write(`data: ${JSON.stringify({ 
-        type: 'error', 
+
+      res.write(`data: ${JSON.stringify({
+        type: 'error',
         content: errorMsg,
-        code: err.code 
+        code: err.code
       })}\n\n`);
       if (res.flush) res.flush();
       res.end();

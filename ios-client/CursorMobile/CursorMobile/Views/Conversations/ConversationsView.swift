@@ -146,7 +146,22 @@ struct ConversationRow: View {
                             .background(conversation.type == "composer" ? Color.purple.opacity(0.2) : Color.blue.opacity(0.2))
                             .foregroundColor(conversation.type == "composer" ? .purple : .blue)
                             .cornerRadius(4)
-                        
+
+                        // Tool badge
+                        if let tool = conversation.tool {
+                            HStack(spacing: 2) {
+                                Image(systemName: tool.icon)
+                                    .font(.system(size: 8))
+                                Text(tool.displayName)
+                                    .font(.caption2)
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(tool.color.opacity(0.2))
+                            .foregroundColor(tool.color)
+                            .cornerRadius(4)
+                        }
+
                         // Read-only badge for Cursor IDE conversations
                         if conversation.isReadOnlyConversation {
                             Text("Read-only")
@@ -157,7 +172,7 @@ struct ConversationRow: View {
                                 .foregroundColor(.orange)
                                 .cornerRadius(4)
                         }
-                        
+
                         // Mobile badge for chats created from mobile
                         if conversation.source == "mobile" {
                             Text("Mobile")
@@ -168,7 +183,7 @@ struct ConversationRow: View {
                                 .foregroundColor(.green)
                                 .cornerRadius(4)
                         }
-                        
+
                         if let projectName = conversation.projectName {
                             Text(projectName)
                                 .font(.caption)

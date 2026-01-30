@@ -1,5 +1,39 @@
 import Foundation
 import UIKit
+import SwiftUI
+
+/// AI CLI tool that created/manages this conversation
+enum ChatTool: String, CaseIterable, Identifiable, Codable {
+    case cursorAgent = "cursor-agent"
+    case claude = "claude"
+    case gemini = "gemini"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .cursorAgent: return "Cursor Agent"
+        case .claude: return "Claude Code"
+        case .gemini: return "Google Gemini"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .cursorAgent: return "arrow.up.forward.circle.fill"
+        case .claude: return "sparkles"
+        case .gemini: return "star.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .cursorAgent: return .blue
+        case .claude: return .purple
+        case .gemini: return .orange
+        }
+    }
+}
 
 struct Conversation: Codable, Identifiable, Hashable {
     let id: String
@@ -12,14 +46,16 @@ struct Conversation: Codable, Identifiable, Hashable {
     let projectName: String?
     let workspaceFolder: String?
     let isProjectChat: Bool?
-    
+    let tool: ChatTool?
+
     // Read-only conversation fields
     let isReadOnly: Bool?
     let readOnlyReason: String?
     let canFork: Bool?
-    
+
     enum CodingKeys: String, CodingKey {
         case id, type, title, timestamp, messageCount, workspaceId, source, projectName, workspaceFolder, isProjectChat
+        case tool
         case isReadOnly, readOnlyReason, canFork
     }
     
@@ -307,6 +343,7 @@ struct MessagesResponse: Codable {
 struct CreateConversationResponse: Codable {
     let chatId: String
     let success: Bool
+    let tool: String?
     let model: String?
     let mode: String?
 }
