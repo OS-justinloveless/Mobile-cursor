@@ -26,6 +26,9 @@ struct MainTabView: View {
             ZStack(alignment: .leading) {
                 // Main content
                 VStack(spacing: 0) {
+                    // WebSocket status indicator at the top
+                    webSocketStatusBar
+
                     mainContent
                 }
                 .frame(width: geometry.size.width)
@@ -302,7 +305,28 @@ struct MainTabView: View {
             }
         }
     }
-    
+
+    private var webSocketStatusBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: webSocketManager.isConnected ? "wifi" : "wifi.slash")
+                .font(.caption2)
+                .foregroundColor(webSocketManager.isConnected ? .green : .red)
+
+            Circle()
+                .fill(webSocketManager.isConnected ? Color.green : Color.red)
+                .frame(width: 6, height: 6)
+
+            Text(webSocketManager.isConnected ? "Connected" : "Disconnected")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(.systemGroupedBackground))
+    }
+
     // MARK: - New Chat
     
     private func createNewChat(for project: Project) {
