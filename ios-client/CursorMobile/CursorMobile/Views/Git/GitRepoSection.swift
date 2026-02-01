@@ -43,13 +43,15 @@ struct GitRepoSection: View {
     // Callback to show a sheet - lifted to parent to survive view recreation
     var onShowSheet: ((GitSheetType) -> Void)?
     
+    // Callback for showing toasts (lifted to parent)
+    var onShowToast: ((ToastData) -> Void)?
+    
     @State private var status: GitStatus?
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var isPushing = false
     @State private var isPulling = false
     @State private var operationError: String?
-    @State private var toastData: ToastData?
     @State private var githubURL: URL?
     
     // Section collapse states
@@ -169,7 +171,6 @@ struct GitRepoSection: View {
                 }
             }
         }
-        .toast($toastData)
         .alert("Git Error", isPresented: .init(
             get: { operationError != nil },
             set: { if !$0 { operationError = nil } }
@@ -720,7 +721,7 @@ struct GitRepoSection: View {
         isPushing = true
         do {
             _ = try await api.gitPush(projectId: project.id, repoPath: repoPath)
-            toastData = .success("Push successful")
+            onShowToast?(.success("Push successful"))
             await loadStatus()
         } catch {
             operationError = "Push failed: \(error.localizedDescription)"
@@ -734,7 +735,7 @@ struct GitRepoSection: View {
         isPulling = true
         do {
             _ = try await api.gitPull(projectId: project.id, repoPath: repoPath)
-            toastData = .success("Pull successful")
+            onShowToast?(.success("Pull successful"))
             await loadStatus()
         } catch {
             operationError = "Pull failed: \(error.localizedDescription)"

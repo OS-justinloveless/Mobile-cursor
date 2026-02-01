@@ -180,6 +180,9 @@ struct GitView: View {
     // Sheet state - lifted to parent to survive child view recreation
     @State private var activeSheet: GitSheetType?
     
+    // Toast state - centralized for single toast display
+    @State private var toastData: ToastData?
+    
     /// Whether to show search/filter/sort controls (only for multiple repos)
     private var showControls: Bool {
         repositories.count > 1
@@ -348,6 +351,7 @@ struct GitView: View {
         .sheet(item: $activeSheet) { sheet in
             sheetContent(for: sheet)
         }
+        .toast($toastData)
     }
     
     // MARK: - Sheet Content
@@ -495,6 +499,9 @@ struct GitView: View {
                     },
                     onShowSheet: { sheet in
                         activeSheet = sheet
+                    },
+                    onShowToast: { toast in
+                        toastData = toast
                     }
                 )
             }
