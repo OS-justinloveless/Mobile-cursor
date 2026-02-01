@@ -177,6 +177,9 @@ struct GitView: View {
     @State private var showFilterSheet = false
     @State private var showSortMenu = false
     
+    // Sheet state - lifted to parent to survive child view recreation
+    @State private var activeSheet: GitSheetType?
+    
     /// Whether to show search/filter/sort controls (only for multiple repos)
     private var showControls: Bool {
         repositories.count > 1
@@ -342,6 +345,43 @@ struct GitView: View {
         .sheet(isPresented: $showFilterSheet) {
             GitFilterSheet(settings: $filterSettings)
         }
+        .sheet(item: $activeSheet) { sheet in
+            sheetContent(for: sheet)
+        }
+    }
+    
+    // MARK: - Sheet Content
+    
+    @ViewBuilder
+    private func sheetContent(for sheet: GitSheetType) -> some View {
+        switch sheet {
+        case .commit(let stagedFiles, let repoPath):
+            GitCommitSheet(project: project, stagedFiles: stagedFiles, repoPath: repoPath) {
+                Task {
+                    // Refresh the specific repo's status after commit
+                    if let rp = repoPath, let repo = repositories.first(where: { $0.path == rp }) {
+                        await refreshRepositoryStatus(repo)
+                    } else if let rootRepo = repositories.first(where: { $0.isRoot }) {
+                        await refreshRepositoryStatus(rootRepo)
+                    }
+                }
+            }
+        case .branch(let currentBranch, let repoPath):
+            GitBranchSheet(project: project, currentBranch: currentBranch, repoPath: repoPath) {
+                Task {
+                    // Refresh the specific repo's status after branch change
+                    if let rp = repoPath, let repo = repositories.first(where: { $0.path == rp }) {
+                        await refreshRepositoryStatus(repo)
+                    } else if let rootRepo = repositories.first(where: { $0.isRoot }) {
+                        await refreshRepositoryStatus(rootRepo)
+                    }
+                }
+            }
+        case .diffTracked(let file, let staged, let repoPath):
+            GitDiffSheet(project: project, file: file, staged: staged, repoPath: repoPath)
+        case .diffUntracked(let path, let repoPath):
+            GitDiffSheet(project: project, untrackedFilePath: path, repoPath: repoPath)
+        }
     }
     
     // MARK: - No Repositories View
@@ -452,6 +492,9 @@ struct GitView: View {
                     ),
                     onStatusChanged: {
                         Task { await refreshRepositoryStatus(repoWithStatus.repository) }
+                    },
+                    onShowSheet: { sheet in
+                        activeSheet = sheet
                     }
                 )
             }

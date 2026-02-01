@@ -1,5 +1,35 @@
 import SwiftUI
 
+/// Enum representing all possible sheets in Git views
+/// Using a single sheet with an enum prevents SwiftUI conflicts from multiple .sheet() modifiers
+/// repoPath is included so the parent view knows which repository the action is for
+enum GitSheetType: Identifiable, Equatable {
+    case commit(stagedFiles: [GitFileChange], repoPath: String?)
+    case branch(currentBranch: String, repoPath: String?)
+    case diffTracked(file: GitFileChange, staged: Bool, repoPath: String?)
+    case diffUntracked(path: String, repoPath: String?)
+    
+    var id: String {
+        switch self {
+        case .commit(_, let repoPath):
+            return "commit-\(repoPath ?? "root")"
+        case .branch(_, let repoPath):
+            return "branch-\(repoPath ?? "root")"
+        case .diffTracked(let file, let staged, let repoPath):
+            return "diff-tracked-\(file.path)-\(staged)-\(repoPath ?? "root")"
+        case .diffUntracked(let path, let repoPath):
+            return "diff-untracked-\(path)-\(repoPath ?? "root")"
+        }
+    }
+    
+    var repoPath: String? {
+        switch self {
+        case .commit(_, let rp), .branch(_, let rp), .diffTracked(_, _, let rp), .diffUntracked(_, let rp):
+            return rp
+        }
+    }
+}
+
 /// A section view that displays git status and controls for a single repository
 struct GitRepoSection: View {
     let project: Project
@@ -10,16 +40,12 @@ struct GitRepoSection: View {
     // Callback when status changes (e.g., after commit, to refresh parent)
     var onStatusChanged: (() -> Void)?
     
+    // Callback to show a sheet - lifted to parent to survive view recreation
+    var onShowSheet: ((GitSheetType) -> Void)?
+    
     @State private var status: GitStatus?
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var showCommitSheet = false
-    @State private var showBranchSheet = false
-    @State private var selectedFile: GitFileChange?
-    @State private var selectedFileStaged = false
-    @State private var showDiffSheet = false
-    @State private var selectedUntrackedFilePath: String?
-    @State private var showUntrackedDiffSheet = false
     @State private var isPushing = false
     @State private var isPulling = false
     @State private var operationError: String?
@@ -141,28 +167,6 @@ struct GitRepoSection: View {
                     await loadStatus()
                     await loadRemotes()
                 }
-            }
-        }
-        .sheet(isPresented: $showCommitSheet) {
-            GitCommitSheet(project: project, stagedFiles: status?.staged ?? [], repoPath: repoPath) {
-                Task { await loadStatus() }
-                onStatusChanged?()
-            }
-        }
-        .sheet(isPresented: $showBranchSheet) {
-            GitBranchSheet(project: project, currentBranch: status?.branch ?? "", repoPath: repoPath) {
-                Task { await loadStatus() }
-                onStatusChanged?()
-            }
-        }
-        .sheet(isPresented: $showDiffSheet) {
-            if let file = selectedFile {
-                GitDiffSheet(project: project, file: file, staged: selectedFileStaged, repoPath: repoPath)
-            }
-        }
-        .sheet(isPresented: $showUntrackedDiffSheet) {
-            if let filePath = selectedUntrackedFilePath {
-                GitDiffSheet(project: project, untrackedFilePath: filePath, repoPath: repoPath)
             }
         }
         .toast($toastData)
@@ -334,7 +338,7 @@ struct GitRepoSection: View {
     @ViewBuilder
     private func branchRow(_ status: GitStatus) -> some View {
         Button {
-            showBranchSheet = true
+            onShowSheet?(.branch(currentBranch: status.branch, repoPath: repoPath))
         } label: {
             HStack {
                 Image(systemName: "arrow.triangle.branch")
@@ -441,9 +445,7 @@ struct GitRepoSection: View {
             
             Button {
                 if let originalFile = status?.staged.first(where: { $0.path == file.path }) {
-                    selectedFile = originalFile
-                    selectedFileStaged = true
-                    showDiffSheet = true
+                    onShowSheet?(.diffTracked(file: originalFile, staged: true, repoPath: repoPath))
                 }
             } label: {
                 HStack {
@@ -515,12 +517,9 @@ struct GitRepoSection: View {
             
             Button {
                 if file.isUntracked {
-                    selectedUntrackedFilePath = file.path
-                    showUntrackedDiffSheet = true
+                    onShowSheet?(.diffUntracked(path: file.path, repoPath: repoPath))
                 } else if let originalFile = status?.unstaged.first(where: { $0.path == file.path }) {
-                    selectedFile = originalFile
-                    selectedFileStaged = false
-                    showDiffSheet = true
+                    onShowSheet?(.diffTracked(file: originalFile, staged: false, repoPath: repoPath))
                 }
             } label: {
                 HStack {
@@ -575,7 +574,7 @@ struct GitRepoSection: View {
     @ViewBuilder
     private func commitButton(stagedCount: Int) -> some View {
         Button {
-            showCommitSheet = true
+            onShowSheet?(.commit(stagedFiles: status?.staged ?? [], repoPath: repoPath))
         } label: {
             HStack {
                 Image(systemName: "checkmark.circle.fill")
