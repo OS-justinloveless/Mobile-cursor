@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import os from 'os';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const execAsync = promisify(exec);
 const router = Router();
@@ -725,6 +730,58 @@ router.post('/exec', async (req, res) => {
       success: false,
       error: error.message,
       stderr: error.stderr || ''
+    });
+  }
+});
+
+// Restart the server
+router.post('/restart', async (req, res) => {
+  try {
+    const { delay = 2 } = req.body || {};
+    
+    // Get the current server's PID - this is the exact process to kill
+    const currentPid = process.pid;
+    
+    console.log(`[System] Server restart requested with ${delay}s delay (current PID: ${currentPid})`);
+    
+    // Get the server directory (routes -> src -> server)
+    const serverDir = path.resolve(__dirname, '../..');
+    
+    // Log file for debugging
+    const logFile = path.join(serverDir, 'restart.log');
+    
+    // Spawn a completely detached process that will:
+    // 1. Wait for the HTTP response to complete
+    // 2. Kill the current server by its exact PID
+    // 3. Start a new server
+    const restarter = spawn('bash', ['-c', `
+      echo "[$(date)] Restart script started, will kill PID ${currentPid}" >> "${logFile}"
+      sleep ${delay}
+      echo "[$(date)] Killing server PID ${currentPid}" >> "${logFile}"
+      kill -15 ${currentPid} 2>/dev/null || kill -9 ${currentPid} 2>/dev/null || true
+      sleep 1
+      echo "[$(date)] Starting new server in ${serverDir}" >> "${logFile}"
+      cd "${serverDir}" && npm start >> "${logFile}" 2>&1 &
+      echo "[$(date)] New server started" >> "${logFile}"
+    `], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    
+    restarter.unref();  // Don't wait for child
+    
+    console.log(`[System] Restart process spawned (PID: ${restarter.pid}), will kill server PID: ${currentPid}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Server restart initiated. Reconnect in a few seconds.' 
+    });
+  } catch (error) {
+    console.error('[System] Failed to initiate restart:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initiate server restart',
+      message: error.message
     });
   }
 });

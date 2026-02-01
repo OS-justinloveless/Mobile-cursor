@@ -5,6 +5,7 @@ import { systemRoutes } from './system.js';
 import { terminalRoutes } from './terminals.js';
 import { gitRoutes } from './git.js';
 import { suggestionsRoutes } from './suggestions.js';
+import { logsRoutes } from './logs.js';
 
 export function setupRoutes(app) {
   app.use('/api/projects', projectRoutes);
@@ -14,6 +15,7 @@ export function setupRoutes(app) {
   app.use('/api/terminals', terminalRoutes);
   app.use('/api/git', gitRoutes);
   app.use('/api/suggestions', suggestionsRoutes);
+  app.use('/api/logs', logsRoutes);
   
   // Health check (no auth required)
   app.get('/health', (req, res) => {

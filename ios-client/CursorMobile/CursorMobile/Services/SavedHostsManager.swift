@@ -114,6 +114,49 @@ class SavedHostsManager: ObservableObject {
         !savedHosts.isEmpty
     }
     
+    // MARK: - Last Project Per Server
+    
+    private let lastProjectStorageKey = "napp-trapp-last-projects"
+    
+    /// Save the last opened project ID for a given server URL
+    func saveLastProject(projectId: String, for serverUrl: String) {
+        var lastProjects = loadLastProjects()
+        let normalizedUrl = normalizeUrl(serverUrl)
+        lastProjects[normalizedUrl] = projectId
+        persistLastProjects(lastProjects)
+        print("[SavedHostsManager] Saved last project \(projectId) for server \(normalizedUrl)")
+    }
+    
+    /// Get the last opened project ID for a given server URL
+    func getLastProjectId(for serverUrl: String) -> String? {
+        let lastProjects = loadLastProjects()
+        let normalizedUrl = normalizeUrl(serverUrl)
+        let projectId = lastProjects[normalizedUrl]
+        print("[SavedHostsManager] Retrieved last project \(projectId ?? "nil") for server \(normalizedUrl)")
+        return projectId
+    }
+    
+    /// Clear the last project for a given server URL
+    func clearLastProject(for serverUrl: String) {
+        var lastProjects = loadLastProjects()
+        let normalizedUrl = normalizeUrl(serverUrl)
+        lastProjects.removeValue(forKey: normalizedUrl)
+        persistLastProjects(lastProjects)
+    }
+    
+    private func loadLastProjects() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: lastProjectStorageKey),
+              let projects = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return projects
+    }
+    
+    private func persistLastProjects(_ projects: [String: String]) {
+        guard let data = try? JSONEncoder().encode(projects) else { return }
+        UserDefaults.standard.set(data, forKey: lastProjectStorageKey)
+    }
+    
     // MARK: - Private Methods
     
     private func loadHosts() {

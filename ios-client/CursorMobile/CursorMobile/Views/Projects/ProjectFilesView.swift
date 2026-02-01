@@ -13,6 +13,7 @@ struct ProjectFilesView: View {
     @State private var selectedFilePath: String?
     @State private var selectedItem: FileItem?
     @State private var showNewFileSheet = false
+    @State private var showUploadSheet = false
     @State private var itemToRename: FileItem?
     @State private var itemToMove: FileItem?
     @State private var itemToDelete: FileItem?
@@ -44,6 +45,12 @@ struct ProjectFilesView: View {
                         showNewFileSheet = true
                     } label: {
                         Label("New File", systemImage: "doc.badge.plus")
+                    }
+                    
+                    Button {
+                        showUploadSheet = true
+                    } label: {
+                        Label("Upload Files", systemImage: "square.and.arrow.up")
                     }
                     
                     Button {
@@ -85,6 +92,13 @@ struct ProjectFilesView: View {
         .sheet(isPresented: $showNewFileSheet) {
             NewFileSheet(basePath: currentPath) { fileName, content in
                 await createFile(name: fileName, content: content)
+            }
+        }
+        .sheet(isPresented: $showUploadSheet) {
+            FileUploadSheet(destinationPath: currentPath) {
+                Task {
+                    await refreshDirectory()
+                }
             }
         }
         .sheet(item: $itemToRename) { item in

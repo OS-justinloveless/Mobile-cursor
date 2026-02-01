@@ -18,6 +18,9 @@ struct MainTabView: View {
     @State private var newChatMode: ChatMode = .agent
     @State private var showNewChatSheet = false
     
+    // Track if we've attempted to restore the last project
+    @State private var hasAttemptedProjectRestore = false
+    
     // Drawer width
     private let drawerWidth: CGFloat = 280
     
@@ -86,6 +89,11 @@ struct MainTabView: View {
                     serverUrl: authManager.serverUrl ?? "",
                     token: authManager.token ?? ""
                 )
+                
+                // Restore last project if we haven't already
+                if !hasAttemptedProjectRestore && selectedProject == nil {
+                    restoreLastProject()
+                }
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
@@ -96,6 +104,11 @@ struct MainTabView: View {
         .onChange(of: selectedProject) { _, newProject in
             if let project = newProject {
                 webSocketManager.watchPath(project.path)
+                
+                // Save this project as the last opened for this server
+                if let serverUrl = authManager.serverUrl {
+                    SavedHostsManager.shared.saveLastProject(projectId: project.id, for: serverUrl)
+                }
             }
         }
         .onChange(of: selectedTab) { _, newTab in
@@ -328,6 +341,42 @@ struct MainTabView: View {
         .background(Color(.systemGroupedBackground))
     }
 
+    // MARK: - Project Restoration
+    
+    private func restoreLastProject() {
+        guard let serverUrl = authManager.serverUrl,
+              let lastProjectId = SavedHostsManager.shared.getLastProjectId(for: serverUrl) else {
+            hasAttemptedProjectRestore = true
+            return
+        }
+        
+        hasAttemptedProjectRestore = true
+        
+        Task {
+            guard let api = authManager.createAPIService() else { return }
+            
+            do {
+                // Fetch projects list
+                let projects = try await api.getProjects()
+                
+                // Find the last project by ID
+                if let lastProject = projects.first(where: { $0.id == lastProjectId }) {
+                    // Open project on server
+                    try await api.openProject(id: lastProject.id)
+                    
+                    await MainActor.run {
+                        selectedProject = lastProject
+                        print("[MainTabView] Restored last project: \(lastProject.name)")
+                    }
+                } else {
+                    print("[MainTabView] Last project ID \(lastProjectId) not found in projects list")
+                }
+            } catch {
+                print("[MainTabView] Failed to restore last project: \(error.localizedDescription)")
+            }
+        }
+    }
+    
     // MARK: - New Chat
     
     private func createNewChat(for project: Project) {

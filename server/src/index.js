@@ -12,6 +12,7 @@ import QRCode from 'qrcode';
 import { setupRoutes } from './routes/index.js';
 import { setupWebSocket } from './websocket/index.js';
 import { AuthManager } from './auth/AuthManager.js';
+import { LogManager } from './utils/LogManager.js';
 
 config();
 
@@ -70,6 +71,10 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+// Initialize logger
+const logger = LogManager.getInstance();
+logger.info('Server', 'Initializing Napp Trapp server', { dataDir: DATA_DIR });
+
 // Initialize auth manager with persistence
 // If AUTH_TOKEN env var is set, it overrides the persisted token
 // Otherwise, the token is loaded from disk (or generated once and saved)
@@ -80,6 +85,7 @@ const authManager = new AuthManager({
 
 // Get the auth token (may be loaded from persistence)
 const AUTH_TOKEN = authManager.getMasterToken();
+logger.info('Server', 'Auth manager initialized', { tokenLength: AUTH_TOKEN?.length || 0 });
 
 // Get local IP address
 function getLocalIP() {
@@ -110,8 +116,32 @@ app.use(express.static(CLIENT_DIST_PATH));
 app.use('/api', (req, res, next) => {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!authManager.validateToken(token)) {
+    logger.warn('Auth', 'Unauthorized API access attempt', { 
+      path: req.path, 
+      method: req.method,
+      ip: req.ip 
+    });
     return res.status(401).json({ error: 'Unauthorized' });
   }
+  next();
+});
+
+// Request logging middleware for API routes
+app.use('/api', (req, res, next) => {
+  const startTime = Date.now();
+  
+  // Log when response finishes
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    const logLevel = res.statusCode >= 400 ? 'warn' : 'debug';
+    logger.log(logLevel, 'API', `${req.method} ${req.path}`, {
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      duration: `${duration}ms`
+    });
+  });
+  
   next();
 });
 
@@ -207,14 +237,21 @@ async function displayStartupMessage() {
 }
 
 server.listen(PORT, '0.0.0.0', () => {
+  logger.info('Server', 'Server started successfully', {
+    port: PORT,
+    ip: LOCAL_IP,
+    url: `http://${LOCAL_IP}:${PORT}`
+  });
   displayStartupMessage();
 });
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
+  logger.info('Server', 'Shutting down server...');
   console.log('\nShutting down server...');
   authManager.shutdown();  // Save auth state before exit
   server.close(() => {
+    logger.info('Server', 'Server closed');
     console.log('Server closed');
     process.exit(0);
   });

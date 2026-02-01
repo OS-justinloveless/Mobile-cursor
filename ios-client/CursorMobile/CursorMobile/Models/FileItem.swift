@@ -186,3 +186,106 @@ struct MoveFileResponse: Codable {
     let sourcePath: String
     let destinationPath: String
 }
+
+// MARK: - File Upload
+
+/// Represents a file to be uploaded
+struct UploadFile {
+    let filename: String
+    let data: Data
+    let mimeType: String
+    
+    init(filename: String, data: Data, mimeType: String? = nil) {
+        self.filename = filename
+        self.data = data
+        self.mimeType = mimeType ?? UploadFile.detectMimeType(filename: filename)
+    }
+    
+    /// Detect MIME type from filename extension
+    static func detectMimeType(filename: String) -> String {
+        let ext = (filename as NSString).pathExtension.lowercased()
+        switch ext {
+        // Text files
+        case "txt": return "text/plain"
+        case "html", "htm": return "text/html"
+        case "css": return "text/css"
+        case "js": return "application/javascript"
+        case "json": return "application/json"
+        case "xml": return "application/xml"
+        case "csv": return "text/csv"
+        case "md": return "text/markdown"
+        
+        // Source code
+        case "swift": return "text/x-swift"
+        case "py": return "text/x-python"
+        case "rb": return "text/x-ruby"
+        case "java": return "text/x-java"
+        case "kt": return "text/x-kotlin"
+        case "go": return "text/x-go"
+        case "rs": return "text/x-rust"
+        case "ts", "tsx": return "text/typescript"
+        case "jsx": return "text/jsx"
+        case "c", "h": return "text/x-c"
+        case "cpp", "hpp", "cc": return "text/x-c++"
+        case "cs": return "text/x-csharp"
+        case "php": return "text/x-php"
+        case "sh", "bash": return "text/x-shellscript"
+        case "yml", "yaml": return "text/yaml"
+        
+        // Images
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "svg": return "image/svg+xml"
+        case "ico": return "image/x-icon"
+        
+        // Documents
+        case "pdf": return "application/pdf"
+        case "doc": return "application/msword"
+        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "xls": return "application/vnd.ms-excel"
+        case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        case "ppt": return "application/vnd.ms-powerpoint"
+        case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        
+        // Archives
+        case "zip": return "application/zip"
+        case "tar": return "application/x-tar"
+        case "gz": return "application/gzip"
+        case "rar": return "application/vnd.rar"
+        case "7z": return "application/x-7z-compressed"
+        
+        // Media
+        case "mp3": return "audio/mpeg"
+        case "wav": return "audio/wav"
+        case "mp4": return "video/mp4"
+        case "mov": return "video/quicktime"
+        case "avi": return "video/x-msvideo"
+        case "webm": return "video/webm"
+        
+        default: return "application/octet-stream"
+        }
+    }
+}
+
+/// Response from file upload
+struct UploadFilesResponse: Codable {
+    let success: Bool
+    let uploaded: [UploadedFileInfo]
+    let errors: [UploadError]?
+    let totalUploaded: Int
+    let totalFailed: Int
+}
+
+struct UploadedFileInfo: Codable {
+    let name: String
+    let path: String
+    let size: Int
+    let mimeType: String
+}
+
+struct UploadError: Codable {
+    let name: String
+    let error: String
+}

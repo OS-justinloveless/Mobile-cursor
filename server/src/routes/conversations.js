@@ -5,6 +5,7 @@ import { CursorChatReader } from '../utils/CursorChatReader.js';
 import { CursorWorkspace } from '../utils/CursorWorkspace.js';
 import { MobileChatStore } from '../utils/MobileChatStore.js';
 import { getCLIAdapter, getSupportedTools, checkAllToolsAvailability } from '../utils/CLIAdapter.js';
+import { logger } from '../utils/LogManager.js';
 
 const router = Router();
 const chatReader = new CursorChatReader();
@@ -321,6 +322,13 @@ router.get('/search/:query', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { workspaceId, model, mode, tool = 'cursor-agent' } = req.body;
+    
+    logger.info('Chat', 'Creating new conversation', {
+      workspaceId,
+      tool,
+      model,
+      mode
+    });
 
     // Validate tool
     const validTools = getSupportedTools();
@@ -420,6 +428,14 @@ router.post('/', async (req, res) => {
       mode: mode || 'agent'
     });
 
+    logger.info('Chat', 'Conversation created successfully', {
+      chatId,
+      tool,
+      model: model || null,
+      mode: mode || 'agent',
+      workspaceId: workspaceId || 'global'
+    });
+    
     console.log(`Created conversation ${chatId} with tool=${tool}, model=${model || 'default'}, mode=${mode || 'agent'}`);
 
     res.json({
@@ -430,6 +446,12 @@ router.post('/', async (req, res) => {
       mode: mode || 'agent'
     });
   } catch (error) {
+    logger.error('Chat', 'Failed to create conversation', {
+      errorMessage: error.message,
+      workspaceId,
+      tool
+    });
+    
     console.error('Error creating conversation:', error);
     res.status(500).json({
       error: 'Failed to create conversation',
@@ -441,6 +463,18 @@ router.post('/', async (req, res) => {
 // Send a message to a conversation
 router.post('/:conversationId/messages', async (req, res) => {
   const startTime = Date.now();
+  const requestId = crypto.randomUUID().slice(0, 8);
+  
+  logger.info('Chat', `[${requestId}] New message request`, {
+    conversationId: req.params.conversationId,
+    hasMessage: !!req.body.message,
+    messageLength: req.body.message?.length || 0,
+    workspaceId: req.body.workspaceId,
+    attachments: req.body.attachments?.length || 0,
+    model: req.body.model,
+    mode: req.body.mode
+  });
+  
   console.log('\n=== NEW MESSAGE REQUEST ===');
   console.log('Timestamp:', new Date().toISOString());
   console.log('Conversation ID:', req.params.conversationId);
@@ -461,6 +495,7 @@ router.post('/:conversationId/messages', async (req, res) => {
     }
     
     if (!message || message.trim() === '') {
+      logger.warn('Chat', `[${requestId}] Empty message rejected`);
       console.error('ERROR: Empty message');
       return res.status(400).json({ error: 'Message cannot be empty' });
     }
@@ -505,18 +540,30 @@ router.post('/:conversationId/messages', async (req, res) => {
     // Get conversation from mobile store to check tool
     const conversation = await mobileChatStore.getConversation(conversationId);
     const tool = conversation?.tool || 'cursor-agent';
+    
+    logger.info('Chat', `[${requestId}] Retrieved conversation`, {
+      conversationId,
+      foundInStore: !!conversation,
+      tool,
+      storedModel: conversation?.model,
+      storedMode: conversation?.mode
+    });
 
     // Get CLI adapter for the tool
     const adapter = getCLIAdapter(tool);
 
     // Check if CLI is installed
-    if (!await adapter.isAvailable()) {
+    const cliAvailable = await adapter.isAvailable();
+    if (!cliAvailable) {
+      logger.error('Chat', `[${requestId}] CLI not available`, { tool, displayName: adapter.getDisplayName() });
       return res.status(503).json({
         error: `${adapter.getDisplayName()} CLI not found`,
         details: adapter.getInstallInstructions(),
         tool
       });
     }
+    
+    logger.debug('Chat', `[${requestId}] CLI available`, { tool });
 
     // Ensure conversation exists in mobile store (update model/mode if provided)
     const conversationUpdate = {
@@ -592,6 +639,15 @@ router.post('/:conversationId/messages', async (req, res) => {
       mode
     });
 
+    logger.info('Chat', `[${requestId}] Spawning CLI`, {
+      tool,
+      executable: adapter.getExecutable(),
+      argsCount: args.length,
+      workspacePath,
+      model,
+      mode
+    });
+    
     console.log(`Spawning ${tool} with args:`, JSON.stringify(args));
     console.log(`Full command: ${adapter.getExecutable()} ${args.join(' ')}`);
 
@@ -682,6 +738,16 @@ router.post('/:conversationId/messages', async (req, res) => {
     agent.on('close', async (code) => {
       clearInterval(keepAliveInterval);
       const duration = Date.now() - startTime;
+      
+      logger.info('Chat', `[${requestId}] CLI process closed`, {
+        tool,
+        exitCode: code,
+        duration,
+        hadData: hasData,
+        assistantTextLength: assistantText.length,
+        toolCallCount: assistantToolCalls.length
+      });
+      
       console.log(`${tool} closed`);
       console.log('Exit code:', code);
       console.log('Duration:', duration + 'ms');
@@ -736,6 +802,13 @@ router.post('/:conversationId/messages', async (req, res) => {
     // Handle errors
     agent.on('error', (err) => {
       clearInterval(keepAliveInterval);
+      
+      logger.error('Chat', `[${requestId}] CLI spawn error`, {
+        tool,
+        errorCode: err.code,
+        errorMessage: err.message
+      });
+      
       console.error(`${tool} spawn error:`, err);
       console.error('Error code:', err.code);
       console.error('Error message:', err.message);
@@ -768,6 +841,11 @@ router.post('/:conversationId/messages', async (req, res) => {
     });
     
   } catch (error) {
+    logger.error('Chat', `[${requestId}] Message handler exception`, {
+      errorMessage: error.message,
+      stack: error.stack
+    });
+    
     console.error('ERROR in message handler:', error);
     console.error('Stack trace:', error.stack);
     

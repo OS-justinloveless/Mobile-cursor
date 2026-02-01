@@ -2,8 +2,20 @@ import { Router } from 'express';
 import fs from 'fs/promises';
 import path from 'path';
 import { createTwoFilesPatch } from 'diff';
+import multer from 'multer';
 
 const router = Router();
+
+// Configure multer for file uploads
+// Files are stored in memory temporarily, then written to the destination
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit per file
+    files: 10 // Max 10 files per request
+  }
+});
 
 // Read file content
 router.get('/read', async (req, res) => {
@@ -289,6 +301,83 @@ router.post('/move', async (req, res) => {
   } catch (error) {
     console.error('Error moving file:', error);
     res.status(500).json({ error: 'Failed to move file or directory' });
+  }
+});
+
+// Upload files to a directory
+router.post('/upload', upload.array('files'), async (req, res) => {
+  try {
+    const { destinationPath } = req.body;
+    
+    if (!destinationPath) {
+      return res.status(400).json({ error: 'Destination path is required' });
+    }
+    
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files provided' });
+    }
+    
+    // Verify destination directory exists
+    try {
+      const stats = await fs.stat(destinationPath);
+      if (!stats.isDirectory()) {
+        return res.status(400).json({ error: 'Destination path is not a directory' });
+      }
+    } catch (e) {
+      if (e.code === 'ENOENT') {
+        // Create the directory if it doesn't exist
+        await fs.mkdir(destinationPath, { recursive: true });
+      } else {
+        throw e;
+      }
+    }
+    
+    const uploadedFiles = [];
+    const errors = [];
+    
+    for (const file of req.files) {
+      const filePath = path.join(destinationPath, file.originalname);
+      
+      try {
+        // Check if file already exists
+        try {
+          await fs.access(filePath);
+          // File exists - we'll overwrite it but log a warning
+          console.log(`[files/upload] Overwriting existing file: ${filePath}`);
+        } catch (e) {
+          // File doesn't exist, which is fine
+        }
+        
+        // Write the file
+        await fs.writeFile(filePath, file.buffer);
+        
+        uploadedFiles.push({
+          name: file.originalname,
+          path: filePath,
+          size: file.size,
+          mimeType: file.mimetype
+        });
+        
+        console.log(`[files/upload] Uploaded: ${filePath} (${file.size} bytes)`);
+      } catch (fileError) {
+        console.error(`[files/upload] Failed to upload ${file.originalname}:`, fileError);
+        errors.push({
+          name: file.originalname,
+          error: fileError.message
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      uploaded: uploadedFiles,
+      errors: errors.length > 0 ? errors : undefined,
+      totalUploaded: uploadedFiles.length,
+      totalFailed: errors.length
+    });
+  } catch (error) {
+    console.error('Error uploading files:', error);
+    res.status(500).json({ error: 'Failed to upload files' });
   }
 });
 

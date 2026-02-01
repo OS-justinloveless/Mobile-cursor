@@ -170,3 +170,14 @@ struct iOSSimulatorsResponse: Codable {
     let success: Bool
     let simulators: [iOSSimulator]
 }
+
+// MARK: - Server Restart Models
+
+struct RestartServerRequest: Codable {
+    let delay: Int
+}
+
+struct RestartServerResponse: Codable {
+    let success: Bool
+    let message: String?
+}

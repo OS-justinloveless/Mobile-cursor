@@ -1,5 +1,12 @@
 import Foundation
 
+// Global logger convenience function for non-MainActor contexts
+fileprivate func logAsync(_ level: LogLevel, _ category: String, _ message: String, data: Any? = nil) {
+    Task { @MainActor in
+        LogManager.shared.log(level, category, message, data: data)
+    }
+}
+
 enum APIError: LocalizedError {
     case invalidURL
     case invalidResponse
@@ -497,6 +504,68 @@ class APIService {
         }
     }
     
+    /// Upload files to a directory on the server
+    /// - Parameters:
+    ///   - files: Array of file data with filename and content
+    ///   - destinationPath: The directory path to upload files to
+    /// - Returns: Upload response with success status and uploaded file info
+    func uploadFiles(files: [UploadFile], destinationPath: String) async throws -> UploadFilesResponse {
+        guard let url = URL(string: "\(serverUrl)/api/files/upload") else {
+            throw APIError.invalidURL
+        }
+        
+        // Create multipart form data
+        let boundary = UUID().uuidString
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        var body = Data()
+        
+        // Add destination path field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"destinationPath\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(destinationPath)\r\n".data(using: .utf8)!)
+        
+        // Add each file
+        for file in files {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(file.filename)\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: \(file.mimeType)\r\n\r\n".data(using: .utf8)!)
+            body.append(file.data)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+        
+        // End boundary
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        request.httpBody = body
+        
+        do {
+            let (data, response) = try await session.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.invalidResponse
+            }
+            
+            switch httpResponse.statusCode {
+            case 200...299:
+                return try decoder.decode(UploadFilesResponse.self, from: data)
+            case 401:
+                throw APIError.unauthorized
+            case 404:
+                throw APIError.notFound
+            default:
+                throw APIError.httpError(httpResponse.statusCode)
+            }
+        } catch let error as APIError {
+            throw error
+        } catch {
+            throw APIError.networkError(error)
+        }
+    }
+    
     // MARK: - Conversations
     
     func getConversations() async throws -> [Conversation] {
@@ -560,7 +629,17 @@ class APIService {
         mode: ChatMode? = nil,
         onEvent: @escaping (MessageStreamEvent) -> Void
     ) async throws {
+        logAsync(.info, "API", "Sending message", data: [
+            "conversationId": conversationId,
+            "messageLength": message.count,
+            "workspaceId": workspaceId ?? "nil",
+            "attachments": attachments?.count ?? 0,
+            "model": model ?? "default",
+            "mode": mode?.rawValue ?? "default"
+        ])
+        
         guard let url = URL(string: "\(serverUrl)/api/conversations/\(conversationId)/messages") else {
+            logAsync(.error, "API", "Invalid URL for sendMessage")
             throw APIError.invalidURL
         }
         
@@ -778,6 +857,8 @@ class APIService {
     ///   - tool: The AI CLI tool to use (cursor-agent, claude, gemini). Defaults to cursor-agent.
     /// - Returns: The ID of the newly created conversation
     func createConversation(workspaceId: String? = nil, model: String? = nil, mode: ChatMode? = nil, tool: String = "cursor-agent") async throws -> String {
+        logAsync(.info, "API", "Creating conversation", data: ["workspaceId": workspaceId ?? "global", "tool": tool, "model": model ?? "default"])
+        
         var bodyDict: [String: Any] = [:]
         if let workspaceId = workspaceId, workspaceId != "global" {
             bodyDict["workspaceId"] = workspaceId
@@ -791,13 +872,15 @@ class APIService {
         bodyDict["tool"] = tool
 
         let body = try JSONSerialization.data(withJSONObject: bodyDict)
-        let data = try await makeRequest(endpoint: "/api/conversations", method: "POST", body: body)
-
+        
         do {
+            let data = try await makeRequest(endpoint: "/api/conversations", method: "POST", body: body)
             let response = try decoder.decode(CreateConversationResponse.self, from: data)
+            logAsync(.info, "API", "Conversation created", data: ["chatId": response.chatId])
             return response.chatId
         } catch {
-            throw APIError.decodingError(error)
+            logAsync(.error, "API", "Failed to create conversation", data: ["error": error.localizedDescription])
+            throw error
         }
     }
     
@@ -1175,6 +1258,69 @@ class APIService {
         }
     }
     
+    // MARK: - Server Logs
+    
+    /// Get recent logs from the server
+    func getServerLogs(limit: Int = 100, level: String? = nil, category: String? = nil) async throws -> [ServerLogEntry] {
+        var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
+        if let level = level {
+            queryItems.append(URLQueryItem(name: "level", value: level))
+        }
+        if let category = category {
+            queryItems.append(URLQueryItem(name: "category", value: category))
+        }
+        
+        let data = try await makeRequest(endpoint: "/api/logs", queryItems: queryItems)
+        do {
+            let response = try decoder.decode(ServerLogsResponse.self, from: data)
+            return response.logs
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Get available server log dates
+    func getServerLogDates() async throws -> [String] {
+        let data = try await makeRequest(endpoint: "/api/logs/dates")
+        do {
+            let response = try decoder.decode(ServerLogDatesResponse.self, from: data)
+            return response.dates
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Get server logs for a specific date
+    func getServerLogsForDate(_ date: String, limit: Int = 200, level: String? = nil) async throws -> [ServerLogEntry] {
+        var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
+        if let level = level {
+            queryItems.append(URLQueryItem(name: "level", value: level))
+        }
+        
+        let data = try await makeRequest(endpoint: "/api/logs/date/\(date)", queryItems: queryItems)
+        do {
+            let response = try decoder.decode(ServerLogsResponse.self, from: data)
+            return response.logs
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    // MARK: - Server Management
+    
+    /// Request server restart
+    /// - Parameter delay: Seconds to wait before restarting (default 2)
+    /// - Returns: Response indicating restart was initiated
+    func restartServer(delay: Int = 2) async throws -> RestartServerResponse {
+        let body = try JSONEncoder().encode(RestartServerRequest(delay: delay))
+        let data = try await makeRequest(endpoint: "/api/system/restart", method: "POST", body: body)
+        do {
+            return try decoder.decode(RestartServerResponse.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
     /// Generate a commit message using AI based on staged changes
     func generateCommitMessage(projectId: String, repoPath: String? = nil) async throws -> String {
         // Use a longer timeout for AI generation
@@ -1280,25 +1426,31 @@ private class SSEStreamDelegate: NSObject, URLSessionDataDelegate {
     // Called when we receive a response (headers)
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         print("[SSEDelegate] Received response")
+        logAsync(.debug, "SSE", "Received response headers")
         
         guard let httpResponse = response as? HTTPURLResponse else {
             print("[SSEDelegate] Invalid response type")
+            logAsync(.error, "SSE", "Invalid response type - not HTTPURLResponse")
             completionHandler(.cancel)
             completeWithError(APIError.invalidResponse)
             return
         }
         
         print("[SSEDelegate] HTTP status: \(httpResponse.statusCode)")
+        logAsync(.info, "SSE", "HTTP status received", data: ["statusCode": httpResponse.statusCode])
         
         guard (200...299).contains(httpResponse.statusCode) else {
             let error: APIError
             switch httpResponse.statusCode {
             case 401:
                 error = .unauthorized
+                logAsync(.error, "SSE", "Unauthorized (401)")
             case 404:
                 error = .notFound
+                logAsync(.error, "SSE", "Not found (404)")
             default:
                 error = .httpError(httpResponse.statusCode)
+                logAsync(.error, "SSE", "HTTP error", data: ["statusCode": httpResponse.statusCode])
             }
             completionHandler(.cancel)
             completeWithError(error)
@@ -1326,6 +1478,12 @@ private class SSEStreamDelegate: NSObject, URLSessionDataDelegate {
     // Called when the task completes (success or error)
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         print("[SSEDelegate] Task completed, error: \(String(describing: error))")
+        
+        if let error = error {
+            logAsync(.error, "SSE", "Task completed with error", data: ["error": error.localizedDescription])
+        } else {
+            logAsync(.info, "SSE", "Task completed successfully")
+        }
         
         // Process any remaining data in buffer
         if !buffer.isEmpty {

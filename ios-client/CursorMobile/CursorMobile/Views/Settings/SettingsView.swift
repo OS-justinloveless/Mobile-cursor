@@ -88,6 +88,11 @@ struct SettingsView: View {
     @State private var cleanBuild = false
     @State private var loadingDevices = false
     
+    // Server restart states
+    @State private var isRestarting = false
+    @State private var restartError: String?
+    @State private var showRestartConfirmation = false
+    
     var body: some View {
         List {
             // Connection Status Section
@@ -114,6 +119,40 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Connection")
+            }
+            
+            // Server Management Section
+            Section {
+                Button {
+                    showRestartConfirmation = true
+                } label: {
+                    HStack {
+                        if isRestarting {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Restarting...")
+                                .padding(.leading, 8)
+                        } else {
+                            Label("Restart Server", systemImage: "arrow.clockwise.circle")
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(isRestarting)
+                
+                if let error = restartError {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            } header: {
+                Text("Server")
+            } footer: {
+                Text("Restart the server process. The app will disconnect and automatically reconnect.")
             }
             
             // Cursor Status Section
@@ -429,6 +468,25 @@ struct SettingsView: View {
                 Text("Cached data allows the app to load content faster. Clearing the cache will require fresh data to be fetched from the server.")
             }
             
+            // Diagnostics Section
+            Section {
+                NavigationLink {
+                    LogViewerView()
+                } label: {
+                    HStack {
+                        Label("Logs", systemImage: "doc.text.magnifyingglass")
+                        Spacer()
+                        Text("View app & server logs")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            } header: {
+                Text("Diagnostics")
+            } footer: {
+                Text("View logs to help debug issues with chats and other features.")
+            }
+            
             // App Info
             Section {
                 HStack {
@@ -553,6 +611,18 @@ struct SettingsView: View {
                 authManager.logout()
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Restart Server?",
+            isPresented: $showRestartConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Restart", role: .destructive) {
+                restartServer()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will restart the server. You'll be briefly disconnected.")
         }
         .sheet(isPresented: $showDevicePicker) {
             NavigationStack {
@@ -716,6 +786,39 @@ struct SettingsView: View {
                 await MainActor.run {
                     buildError = error.localizedDescription
                     isBuilding = false
+                }
+            }
+        }
+    }
+    
+    private func restartServer() {
+        isRestarting = true
+        restartError = nil
+        
+        Task {
+            guard let api = authManager.createAPIService() else {
+                await MainActor.run {
+                    restartError = "Not authenticated"
+                    isRestarting = false
+                }
+                return
+            }
+            
+            do {
+                let response = try await api.restartServer()
+                await MainActor.run {
+                    if response.success {
+                        // Server will restart - we'll be disconnected shortly
+                        isRestarting = false
+                    } else {
+                        restartError = response.message ?? "Failed to restart"
+                        isRestarting = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    restartError = error.localizedDescription
+                    isRestarting = false
                 }
             }
         }

@@ -3,6 +3,9 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 import { terminalManager, ptyManager } from '../routes/terminals.js';
+import { LogManager } from '../utils/LogManager.js';
+
+const logger = LogManager.getInstance();
 
 const clients = new Map();
 const watchers = new Map();
@@ -98,7 +101,7 @@ export function setupWebSocket(wss, authManager) {
     let watchedPaths = new Set();
     let subscribedTerminals = new Set();
     
-    console.log(`Client connected: ${clientId}`);
+    logger.info('WebSocket', 'Client connected', { clientId });
     
     ws.send(JSON.stringify({
       type: 'connection',
@@ -181,7 +184,7 @@ export function setupWebSocket(wss, authManager) {
             }));
         }
       } catch (error) {
-        console.error('WebSocket message error:', error);
+        logger.error('WebSocket', 'Message processing error', { clientId, error: error.message });
         ws.send(JSON.stringify({
           type: 'error',
           message: error.message
@@ -190,7 +193,7 @@ export function setupWebSocket(wss, authManager) {
     });
     
     ws.on('close', () => {
-      console.log(`Client disconnected: ${clientId}`);
+      logger.info('WebSocket', 'Client disconnected', { clientId });
       
       // Clean up file watchers
       for (const watchPath of watchedPaths) {
@@ -230,7 +233,7 @@ export function setupWebSocket(wss, authManager) {
     });
     
     ws.on('error', (error) => {
-      console.error(`WebSocket error for ${clientId}:`, error);
+      logger.error('WebSocket', 'Client error', { clientId, error: error.message });
     });
   });
 }
