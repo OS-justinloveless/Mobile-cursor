@@ -77,16 +77,17 @@ terminalRoutes.get('/', (req, res) => {
 /**
  * POST /api/terminals
  * Create a new terminal session (PTY or tmux)
- * Body: { cwd, shell, cols, rows, type, projectPath }
+ * Body: { cwd, shell, cols, rows, type, projectPath, windowName }
  *   - type: 'pty' (default) or 'tmux'
  *   - projectPath: Required for tmux sessions (used for session naming)
+ *   - windowName: Optional name for the tmux window
  */
 terminalRoutes.post('/', (req, res) => {
   try {
-    const { cwd, shell, cols, rows, type = 'pty', projectPath } = req.body;
+    const { cwd, shell, cols, rows, type = 'pty', projectPath, windowName } = req.body;
     
     if (type === 'tmux') {
-      // Create a tmux session
+      // Create a tmux terminal (session + window)
       if (!projectPath) {
         return res.status(400).json({
           error: 'projectPath is required for tmux sessions'
@@ -100,15 +101,15 @@ terminalRoutes.post('/', (req, res) => {
         });
       }
       
-      const session = tmuxManager.createSession({
+      const terminal = tmuxManager.createTerminal({
         projectPath,
         cwd: cwd || projectPath,
-        shell
+        windowName
       });
       
       return res.json({
         success: true,
-        terminal: session
+        terminal
       });
     }
     
@@ -141,15 +142,54 @@ terminalRoutes.get('/tmux/status', (req, res) => {
   try {
     const available = tmuxManager.isTmuxAvailable();
     const version = available ? tmuxManager.getTmuxVersion() : null;
+    const sessions = available ? tmuxManager.listAllSessions().filter(s => s.isMobileSession) : [];
     
     res.json({
       available,
-      version
+      version,
+      sessionCount: sessions.length,
+      sessions: sessions.map(s => ({
+        name: s.name,
+        windowCount: s.windowCount,
+        attached: s.attached,
+        projectName: s.projectName
+      }))
     });
   } catch (error) {
     console.error('Error getting tmux status:', error);
     res.status(500).json({
       error: 'Failed to get tmux status',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/terminals/tmux/sessions/:sessionName/windows
+ * List windows in a tmux session
+ */
+terminalRoutes.get('/tmux/sessions/:sessionName/windows', (req, res) => {
+  try {
+    const { sessionName } = req.params;
+    
+    if (!tmuxManager.sessionExists(sessionName)) {
+      return res.status(404).json({
+        error: 'Session not found',
+        sessionName
+      });
+    }
+    
+    const windows = tmuxManager.listWindows(sessionName);
+    
+    res.json({
+      sessionName,
+      windows,
+      count: windows.length
+    });
+  } catch (error) {
+    console.error('Error listing windows:', error);
+    res.status(500).json({
+      error: 'Failed to list windows',
       message: error.message
     });
   }
@@ -188,20 +228,22 @@ terminalRoutes.get('/:id', (req, res) => {
         });
       }
       
-      const sessionName = tmuxManager.getSessionNameFromId(id);
-      const terminal = tmuxManager.getTerminalInfo(sessionName, projectPath);
+      const terminal = tmuxManager.getTerminalInfo(id, projectPath);
       
       if (!terminal) {
         return res.status(404).json({
-          error: 'Tmux session not found',
+          error: 'Tmux terminal not found',
           id
         });
       }
       
       const response = { terminal };
       
-      if (includeContentBool && tmuxManager.isAttached(sessionName)) {
-        response.content = tmuxManager.getBuffer(sessionName);
+      if (includeContentBool) {
+        const { sessionName, windowIndex } = tmuxManager.parseTerminalId(id);
+        if (tmuxManager.isAttached(sessionName, windowIndex)) {
+          response.content = tmuxManager.getBuffer(sessionName, windowIndex);
+        }
       }
       
       return res.json(response);
@@ -262,7 +304,7 @@ terminalRoutes.get('/:id', (req, res) => {
     
     return res.status(400).json({ 
       error: 'Invalid terminal ID format',
-      hint: 'Terminal IDs should be: pty-N (mobile), tmux-{sessionName}, or cursor-N (Cursor IDE)'
+      hint: 'Terminal IDs should be: pty-N (mobile), tmux-{sessionName}:{windowIndex}, or cursor-N (Cursor IDE)'
     });
   } catch (error) {
     console.error('Error getting terminal:', error);
@@ -362,14 +404,14 @@ terminalRoutes.post('/:id/input', (req, res) => {
     
     // Handle tmux terminals
     if (tmuxManager.isTmuxTerminal(id)) {
-      const sessionName = tmuxManager.getSessionNameFromId(id);
-      if (!tmuxManager.isAttached(sessionName)) {
+      const { sessionName, windowIndex } = tmuxManager.parseTerminalId(id);
+      if (!tmuxManager.isAttached(sessionName, windowIndex)) {
         return res.status(400).json({
-          error: 'Tmux session is not attached',
-          hint: 'Attach to the session first via WebSocket'
+          error: 'Tmux window is not attached',
+          hint: 'Attach to the terminal first via WebSocket'
         });
       }
-      tmuxManager.writeToSession(sessionName, data);
+      tmuxManager.writeToWindow(sessionName, windowIndex, data);
       return res.json({ success: true });
     }
     
@@ -418,14 +460,14 @@ terminalRoutes.post('/:id/resize', (req, res) => {
     
     // Handle tmux terminals
     if (tmuxManager.isTmuxTerminal(id)) {
-      const sessionName = tmuxManager.getSessionNameFromId(id);
-      if (!tmuxManager.isAttached(sessionName)) {
+      const { sessionName, windowIndex } = tmuxManager.parseTerminalId(id);
+      if (!tmuxManager.isAttached(sessionName, windowIndex)) {
         return res.status(400).json({
-          error: 'Tmux session is not attached',
-          hint: 'Attach to the session first via WebSocket'
+          error: 'Tmux window is not attached',
+          hint: 'Attach to the terminal first via WebSocket'
         });
       }
-      tmuxManager.resizeSession(sessionName, cols, rows);
+      tmuxManager.resizeWindow(sessionName, windowIndex, cols, rows);
       return res.json({ success: true });
     }
     
@@ -465,8 +507,8 @@ terminalRoutes.delete('/:id', (req, res) => {
     
     // Handle tmux terminals
     if (tmuxManager.isTmuxTerminal(id)) {
-      const sessionName = tmuxManager.getSessionNameFromId(id);
-      tmuxManager.killSession(sessionName);
+      const { sessionName, windowIndex } = tmuxManager.parseTerminalId(id);
+      tmuxManager.killWindow(sessionName, windowIndex);
       return res.json({ success: true });
     }
     
@@ -486,6 +528,36 @@ terminalRoutes.delete('/:id', (req, res) => {
     res.status(500).json({ 
       error: 'Failed to delete terminal',
       message: error.message 
+    });
+  }
+});
+
+/**
+ * DELETE /api/terminals/tmux/sessions/:sessionName
+ * Kill an entire tmux session (all windows)
+ */
+terminalRoutes.delete('/tmux/sessions/:sessionName', (req, res) => {
+  try {
+    const { sessionName } = req.params;
+    
+    if (!tmuxManager.sessionExists(sessionName)) {
+      return res.status(404).json({
+        error: 'Session not found',
+        sessionName
+      });
+    }
+    
+    tmuxManager.killSession(sessionName);
+    
+    res.json({
+      success: true,
+      message: `Session ${sessionName} and all its windows have been killed`
+    });
+  } catch (error) {
+    console.error('Error killing session:', error);
+    res.status(500).json({
+      error: 'Failed to kill session',
+      message: error.message
     });
   }
 });
