@@ -1640,6 +1640,9 @@ struct ToolCallRow: View {
     let toolCall: ToolCall
     @State private var isExpanded = false
     
+    /// Number of lines to show in the preview (when collapsed)
+    private let previewLineCount = 4
+    
     private var statusColor: Color {
         switch toolCall.status {
         case .running:
@@ -1649,6 +1652,37 @@ struct ToolCallRow: View {
         case .error:
             return .red
         }
+    }
+    
+    /// Get the last N lines of a string for preview
+    private func getLastLines(_ text: String, count: Int) -> (text: String, hasMore: Bool) {
+        let lines = text.components(separatedBy: .newlines)
+        let nonEmptyLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        
+        if nonEmptyLines.count <= count {
+            return (nonEmptyLines.joined(separator: "\n"), false)
+        }
+        
+        let lastLines = Array(nonEmptyLines.suffix(count))
+        return (lastLines.joined(separator: "\n"), true)
+    }
+    
+    /// Format tool result for human-readable display
+    private func formatResultForDisplay(_ result: String) -> String {
+        // Clean up common patterns in tool output
+        var formatted = result
+        
+        // Trim excessive whitespace
+        formatted = formatted.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        return formatted
+    }
+    
+    /// Get a summary of the result for the collapsed preview
+    private var resultPreview: (text: String, hasMore: Bool)? {
+        guard let result = toolCall.result, !result.isEmpty else { return nil }
+        let formatted = formatResultForDisplay(result)
+        return getLastLines(formatted, count: previewLineCount)
     }
     
     var body: some View {
@@ -1712,51 +1746,44 @@ struct ToolCallRow: View {
             }
             .buttonStyle(.plain)
             
-            // Details - shown when expanded
+            // Collapsed preview - show last few lines of result
+            if !isExpanded, let preview = resultPreview {
+                Divider()
+                    .padding(.leading, 12)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    if preview.hasMore {
+                        Text("... \(previewLineCount) lines shown")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+                    
+                    Text(preview.text)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.primary)
+                        .lineLimit(nil)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(.tertiarySystemBackground).opacity(0.5))
+            }
+            
+            // Expanded details - show full input and result
             if isExpanded {
                 Divider()
                     .padding(.leading, 12)
                 
                 VStack(alignment: .leading, spacing: 12) {
-                    // Input
+                    // Input parameters - formatted for readability
                     if let input = toolCall.input, !input.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("INPUT")
-                                .font(.caption2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                            
-                            ScrollView(.horizontal, showsIndicators: true) {
-                                Text(formatInput(input))
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundColor(.primary)
-                            }
-                            .frame(maxHeight: 150)
-                            .padding(8)
-                            .background(Color(.tertiarySystemBackground))
-                            .cornerRadius(6)
-                        }
+                        ToolCallInputView(toolName: toolCall.name, input: input)
                     }
                     
-                    // Result
+                    // Full result
                     if let result = toolCall.result, !result.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("RESULT")
-                                .font(.caption2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                            
-                            ScrollView {
-                                Text(result.prefix(2000) + (result.count > 2000 ? "\n...(truncated)" : ""))
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundColor(.primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .frame(maxHeight: 200)
-                            .padding(8)
-                            .background(Color(.tertiarySystemBackground))
-                            .cornerRadius(6)
-                        }
+                        ToolCallResultView(result: result, isError: toolCall.status == .error)
                     }
                 }
                 .padding(12)
@@ -1769,32 +1796,247 @@ struct ToolCallRow: View {
                 .stroke(Color(.separator), lineWidth: 0.5)
         )
     }
+}
+
+// MARK: - Tool Call Input View
+
+struct ToolCallInputView: View {
+    let toolName: String
+    let input: [String: AnyCodableValue]
     
-    private func formatInput(_ input: [String: AnyCodableValue]) -> String {
-        // Convert to a readable string
-        var lines: [String] = []
-        for (key, value) in input.sorted(by: { $0.key < $1.key }) {
-            lines.append("\(key): \(formatValue(value))")
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("PARAMETERS")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(sortedParameters, id: \.key) { param in
+                    ParameterRow(key: param.key, value: param.value, toolName: toolName)
+                }
+            }
+            .padding(8)
+            .background(Color(.tertiarySystemBackground))
+            .cornerRadius(6)
         }
-        return lines.joined(separator: "\n")
+    }
+    
+    /// Sort parameters with important ones first
+    private var sortedParameters: [(key: String, value: AnyCodableValue)] {
+        let priorityKeys = ["path", "command", "pattern", "query", "url", "contents", "old_string", "new_string"]
+        
+        return input.sorted { a, b in
+            let aIndex = priorityKeys.firstIndex(of: a.key) ?? priorityKeys.count
+            let bIndex = priorityKeys.firstIndex(of: b.key) ?? priorityKeys.count
+            if aIndex != bIndex {
+                return aIndex < bIndex
+            }
+            return a.key < b.key
+        }
+    }
+}
+
+struct ParameterRow: View {
+    let key: String
+    let value: AnyCodableValue
+    let toolName: String
+    
+    @State private var isValueExpanded = false
+    
+    /// Maximum characters to show before truncating
+    private let maxDisplayLength = 80
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .top, spacing: 8) {
+                // Parameter name with icon
+                HStack(spacing: 4) {
+                    Image(systemName: iconForParameter)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    
+                    Text(humanReadableKey)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(minWidth: 70, alignment: .leading)
+                
+                // Value
+                if needsTruncation {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(isValueExpanded ? fullValue : truncatedValue)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .textSelection(.enabled)
+                        
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                isValueExpanded.toggle()
+                            }
+                        } label: {
+                            Text(isValueExpanded ? "Show less" : "Show more...")
+                                .font(.caption2)
+                                .foregroundColor(.accentColor)
+                        }
+                    }
+                } else {
+                    Text(fullValue)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.primary)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+    
+    private var humanReadableKey: String {
+        // Convert snake_case to Title Case
+        key.replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.capitalized }
+            .joined(separator: " ")
+    }
+    
+    private var iconForParameter: String {
+        switch key {
+        case "path", "target_directory": return "folder"
+        case "command": return "terminal"
+        case "pattern", "glob_pattern": return "magnifyingglass"
+        case "query": return "text.magnifyingglass"
+        case "url": return "link"
+        case "contents", "new_string": return "doc.text"
+        case "old_string": return "doc.text.magnifyingglass"
+        case "description": return "text.quote"
+        default: return "circle.fill"
+        }
+    }
+    
+    private var fullValue: String {
+        formatValue(value)
+    }
+    
+    private var truncatedValue: String {
+        let full = fullValue
+        if full.count > maxDisplayLength {
+            return String(full.prefix(maxDisplayLength)) + "..."
+        }
+        return full
+    }
+    
+    private var needsTruncation: Bool {
+        fullValue.count > maxDisplayLength
     }
     
     private func formatValue(_ value: AnyCodableValue) -> String {
         switch value {
         case .string(let s):
-            return s.count > 100 ? String(s.prefix(100)) + "..." : s
+            return s
         case .int(let i):
             return String(i)
         case .double(let d):
             return String(d)
         case .bool(let b):
-            return String(b)
+            return b ? "Yes" : "No"
         case .array(let arr):
-            return "[\(arr.count) items]"
+            if arr.isEmpty { return "Empty list" }
+            let items = arr.prefix(5).map { formatValue($0) }
+            let suffix = arr.count > 5 ? " (+\(arr.count - 5) more)" : ""
+            return items.joined(separator: ", ") + suffix
         case .dictionary(let dict):
-            return "{\(dict.count) keys}"
+            if dict.isEmpty { return "Empty" }
+            return "{\(dict.count) properties}"
         case .null:
-            return "null"
+            return "None"
+        }
+    }
+}
+
+// MARK: - Tool Call Result View
+
+struct ToolCallResultView: View {
+    let result: String
+    let isError: Bool
+    
+    @State private var isFullyExpanded = false
+    
+    /// Maximum lines to show by default
+    private let defaultLineCount = 10
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(isError ? "ERROR" : "OUTPUT")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(isError ? .red : .secondary)
+                
+                Spacer()
+                
+                if hasMoreContent {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isFullyExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(isFullyExpanded ? "Collapse" : "Expand All")
+                                .font(.caption2)
+                            Image(systemName: isFullyExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundColor(.accentColor)
+                    }
+                }
+            }
+            
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if hasMoreContent && !isFullyExpanded {
+                        Text("... \(hiddenLineCount) lines hidden ...")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .italic()
+                            .padding(.bottom, 4)
+                    }
+                    
+                    Text(displayedContent)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(isError ? .red : .primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(maxHeight: isFullyExpanded ? 400 : 150)
+            .padding(8)
+            .background(isError ? Color.red.opacity(0.1) : Color(.tertiarySystemBackground))
+            .cornerRadius(6)
+        }
+    }
+    
+    private var resultLines: [String] {
+        result.components(separatedBy: .newlines)
+    }
+    
+    private var hasMoreContent: Bool {
+        resultLines.count > defaultLineCount
+    }
+    
+    private var hiddenLineCount: Int {
+        max(0, resultLines.count - defaultLineCount)
+    }
+    
+    private var displayedContent: String {
+        if isFullyExpanded || !hasMoreContent {
+            // Show all content, but cap at reasonable size
+            if result.count > 10000 {
+                return String(result.prefix(10000)) + "\n\n... (content truncated at 10,000 characters)"
+            }
+            return result
+        } else {
+            // Show last N lines
+            let lastLines = Array(resultLines.suffix(defaultLineCount))
+            return lastLines.joined(separator: "\n")
         }
     }
 }
