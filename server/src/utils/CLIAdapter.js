@@ -1,6 +1,5 @@
 import { execSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { ContentBlockType, createContentBlock, isDiffContent, parseDiff, extractCodeBlocks } from './OutputParser.js';
 
 /**
  * Base CLI Adapter - Abstract interface for AI CLI tools
@@ -10,7 +9,10 @@ import { ContentBlockType, createContentBlock, isDiffContent, parseDiff, extract
  * - claude: Claude Code CLI (claude or claude-code)
  * - gemini: Google Gemini CLI
  *
- * Each adapter implements tool-specific command construction and output parsing.
+ * Each adapter implements tool-specific command construction.
+ * 
+ * Note: Output parsing has been removed. Chats now run as tmux windows
+ * where the terminal handles raw output directly.
  */
 export class CLIAdapter {
   /**

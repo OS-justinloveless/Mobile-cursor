@@ -102,32 +102,32 @@ class CacheManager {
         load(forKey: projectsKey, as: [Project].self)
     }
     
-    /// Cache key for project conversations
-    private func projectConversationsKey(projectId: String) -> String {
-        "project_\(projectId)_conversations"
+    /// Cache key for project chat windows
+    private func projectChatsKey(projectId: String) -> String {
+        "project_\(projectId)_chats"
     }
     
-    /// Save project conversations to cache
-    func saveProjectConversations(_ conversations: [Conversation], projectId: String) {
-        save(conversations, forKey: projectConversationsKey(projectId: projectId))
+    /// Save project chat windows to cache
+    func saveProjectChats(_ chats: [ChatWindow], projectId: String) {
+        save(chats, forKey: projectChatsKey(projectId: projectId))
     }
     
-    /// Load project conversations from cache
-    func loadProjectConversations(projectId: String) -> CachedData<[Conversation]>? {
-        load(forKey: projectConversationsKey(projectId: projectId), as: [Conversation].self)
+    /// Load project chat windows from cache
+    func loadProjectChats(projectId: String) -> CachedData<[ChatWindow]>? {
+        load(forKey: projectChatsKey(projectId: projectId), as: [ChatWindow].self)
     }
     
-    /// Cache key for global conversations
-    private var conversationsKey: String { "conversations_list" }
+    /// Cache key for all chat windows
+    private var chatsKey: String { "chats_list" }
     
-    /// Save global conversations to cache
-    func saveConversations(_ conversations: [Conversation]) {
-        save(conversations, forKey: conversationsKey)
+    /// Save chat windows to cache
+    func saveChats(_ chats: [ChatWindow]) {
+        save(chats, forKey: chatsKey)
     }
     
-    /// Load global conversations from cache
-    func loadConversations() -> CachedData<[Conversation]>? {
-        load(forKey: conversationsKey, as: [Conversation].self)
+    /// Load chat windows from cache
+    func loadChats() -> CachedData<[ChatWindow]>? {
+        load(forKey: chatsKey, as: [ChatWindow].self)
     }
     
     /// Cache key for file items in a directory

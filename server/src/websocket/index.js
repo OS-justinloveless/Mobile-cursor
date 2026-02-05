@@ -4,13 +4,8 @@ import os from 'os';
 import fs from 'fs';
 import { terminalManager, ptyManager, tmuxManager } from '../routes/terminals.js';
 import { LogManager } from '../utils/LogManager.js';
-import { cliSessionManager } from '../utils/CLISessionManager.js';
-import { MobileChatStore } from '../utils/MobileChatStore.js';
-import { CursorWorkspace } from '../utils/CursorWorkspace.js';
 
 const logger = LogManager.getInstance();
-const mobileChatStore = MobileChatStore.getInstance();
-const workspaceManager = new CursorWorkspace();
 const tmuxSubscribers = new Map(); // "sessionName:windowIndex" -> Set of clientIds
 
 const clients = new Map();
@@ -18,7 +13,6 @@ const watchers = new Map();
 const dbWatchers = new Map();
 const cursorTerminalWatchers = new Map(); // terminalId -> { watcher, filePath, subscribers, lastContent }
 const ptySubscribers = new Map(); // terminalId -> Set of clientIds
-const chatSubscribers = new Map(); // conversationId -> Set of { clientId, unsubscribe }
 
 /**
  * Get Cursor database paths
@@ -179,23 +173,6 @@ export function setupWebSocket(wss, authManager) {
           case 'terminalKill':
             handleTerminalKill(clientId, ws, message);
             break;
-          
-          // Chat session handlers
-          case 'chatAttach':
-            handleChatAttach(clientId, ws, message);
-            break;
-            
-          case 'chatDetach':
-            handleChatDetach(clientId, message);
-            break;
-            
-          case 'chatMessage':
-            handleChatMessage(clientId, ws, message);
-            break;
-            
-          case 'chatCancel':
-            handleChatCancel(clientId, ws, message);
-            break;
             
           case 'ping':
             ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
@@ -253,22 +230,37 @@ export function setupWebSocket(wss, authManager) {
         // Tmux terminals
         if (tmuxManager.isTmuxTerminal(terminalId)) {
           const { sessionName, windowIndex } = tmuxManager.parseTerminalId(terminalId);
-          const windowKey = tmuxManager.getWindowKey(sessionName, windowIndex);
+          
+          // Get the client session name for this client
+          const clientSessionName = tmuxManager.generateClientSessionName(sessionName, clientId);
+          const windowKey = tmuxManager.getWindowKey(clientSessionName, windowIndex);
+          
           const subscribers = tmuxSubscribers.get(windowKey);
           if (subscribers) {
             subscribers.delete(clientId);
-            // If no more subscribers, detach (but keep session running)
+            // If no more subscribers for this client session, detach
             if (subscribers.size === 0) {
-              tmuxManager.detachFromWindow(sessionName, windowIndex);
+              tmuxManager.detachFromWindow(clientSessionName, windowIndex);
               tmuxSubscribers.delete(windowKey);
-              console.log(`Detached from tmux window ${windowKey} (client disconnected)`);
+              console.log(`Detached from tmux client session ${windowKey} (client disconnected)`);
+              
+              // Optionally destroy the client session to clean up
+              // The base session and windows remain intact
+              try {
+                if (tmuxManager.sessionExists(clientSessionName)) {
+                  tmuxManager.destroySession(clientSessionName);
+                  console.log(`Cleaned up client session ${clientSessionName}`);
+                }
+              } catch (e) {
+                console.warn(`Could not cleanup client session ${clientSessionName}: ${e.message}`);
+              }
             }
           }
           // Remove output handler
           if (client && client.outputHandlers) {
             const handler = client.outputHandlers.get(terminalId);
             if (handler) {
-              tmuxManager.removeOutputHandler(sessionName, windowIndex, handler);
+              tmuxManager.removeOutputHandler(clientSessionName, windowIndex, handler);
             }
           }
         }
@@ -281,20 +273,6 @@ export function setupWebSocket(wss, authManager) {
             cursorWatcher.watcher.close();
             cursorTerminalWatchers.delete(terminalId);
             console.log(`Closed file watcher for Cursor terminal: ${terminalId}`);
-          }
-        }
-      }
-      
-      // Clean up chat subscriptions
-      for (const [conversationId, subscribers] of chatSubscribers) {
-        const clientSub = [...subscribers].find(s => s.clientId === clientId);
-        if (clientSub) {
-          if (clientSub.unsubscribe) {
-            clientSub.unsubscribe();
-          }
-          subscribers.delete(clientSub);
-          if (subscribers.size === 0) {
-            chatSubscribers.delete(conversationId);
           }
         }
       }
@@ -430,10 +408,6 @@ export function cleanup() {
   // Clean up tmux attached windows (but don't kill tmux sessions - they persist)
   tmuxManager.cleanup();
   tmuxSubscribers.clear();
-  
-  // Clean up CLI sessions
-  cliSessionManager.cleanup();
-  chatSubscribers.clear();
   
   if (terminalManager) {
     terminalManager.clearTTYCache();
@@ -662,9 +636,7 @@ function handleTmuxTerminalAttach(clientId, ws, terminalId, projectPath) {
     return;
   }
   
-  const windowKey = tmuxManager.getWindowKey(sessionName, windowIndex);
-  
-  // Check if session exists
+  // Check if base session exists
   if (!tmuxManager.sessionExists(sessionName)) {
     ws.send(JSON.stringify({
       type: 'terminalError',
@@ -704,9 +676,17 @@ function handleTmuxTerminalAttach(clientId, ws, terminalId, projectPath) {
     client.outputHandlers.delete(terminalId);
   }
   
-  // Attach to the tmux window (spawns PTY with tmux attach)
+  // Attach to the tmux window with client-specific grouped session
+  // This allows each client (mobile, desktop) to have an independent view
+  // while sharing the same windows
+  let attachResult;
   try {
-    tmuxManager.attachToWindow(sessionName, windowIndex, { cols: 80, rows: 24 });
+    attachResult = tmuxManager.attachToWindow(sessionName, windowIndex, { 
+      cols: 80, 
+      rows: 24,
+      clientId  // Creates a grouped session for this client
+    });
+    console.log(`[WS] Client ${clientId} attached to tmux window with independent view`);
   } catch (error) {
     ws.send(JSON.stringify({
       type: 'terminalError',
@@ -716,7 +696,11 @@ function handleTmuxTerminalAttach(clientId, ws, terminalId, projectPath) {
     return;
   }
   
-  // Set up subscribers tracking
+  // Use client session for tracking (allows independent cleanup)
+  const clientSessionName = attachResult.clientSessionName || sessionName;
+  const windowKey = tmuxManager.getWindowKey(clientSessionName, windowIndex);
+  
+  // Set up subscribers tracking for this client's session
   if (!tmuxSubscribers.has(windowKey)) {
     tmuxSubscribers.set(windowKey, new Set());
   }
@@ -737,10 +721,11 @@ function handleTmuxTerminalAttach(clientId, ws, terminalId, projectPath) {
     }
   };
   
-  // Store handler reference for cleanup
+  // Store handler reference for cleanup (include client session name for proper cleanup)
   client.outputHandlers.set(terminalId, outputHandler);
+  client.clientSessionName = clientSessionName; // Store for cleanup
   
-  tmuxManager.addOutputHandler(sessionName, windowIndex, outputHandler);
+  tmuxManager.addOutputHandler(clientSessionName, windowIndex, outputHandler);
   
   // Get terminal info for response
   const terminalInfo = tmuxManager.getTerminalInfo(terminalId, projectPath);
@@ -935,16 +920,30 @@ function handleTerminalDetach(clientId, message) {
   // Handle tmux terminal
   if (tmuxManager.isTmuxTerminal(terminalId)) {
     const { sessionName, windowIndex } = tmuxManager.parseTerminalId(terminalId);
-    const windowKey = tmuxManager.getWindowKey(sessionName, windowIndex);
+    
+    // Get the client session name for this client
+    const clientSessionName = client?.clientSessionName || tmuxManager.generateClientSessionName(sessionName, clientId);
+    const windowKey = tmuxManager.getWindowKey(clientSessionName, windowIndex);
+    
     const subscribers = tmuxSubscribers.get(windowKey);
     if (subscribers) {
       subscribers.delete(clientId);
       
-      // If no more subscribers, detach from tmux window (but keep session running)
+      // If no more subscribers, detach from tmux client session
       if (subscribers.size === 0) {
-        tmuxManager.detachFromWindow(sessionName, windowIndex);
+        tmuxManager.detachFromWindow(clientSessionName, windowIndex);
         tmuxSubscribers.delete(windowKey);
-        console.log(`Detached from tmux window ${windowKey} (no subscribers)`);
+        console.log(`Detached from tmux client session ${windowKey} (no subscribers)`);
+        
+        // Clean up the client session (base session and windows remain)
+        try {
+          if (tmuxManager.sessionExists(clientSessionName)) {
+            tmuxManager.destroySession(clientSessionName);
+            console.log(`Cleaned up client session ${clientSessionName}`);
+          }
+        } catch (e) {
+          console.warn(`Could not cleanup client session ${clientSessionName}: ${e.message}`);
+        }
       }
     }
     
@@ -952,7 +951,7 @@ function handleTerminalDetach(clientId, message) {
     if (client && client.outputHandlers) {
       const handler = client.outputHandlers.get(terminalId);
       if (handler) {
-        tmuxManager.removeOutputHandler(sessionName, windowIndex, handler);
+        tmuxManager.removeOutputHandler(clientSessionName, windowIndex, handler);
         client.outputHandlers.delete(terminalId);
       }
     }
@@ -1007,7 +1006,12 @@ function handleTerminalInput(clientId, ws, message) {
   if (tmuxManager.isTmuxTerminal(terminalId)) {
     try {
       const { sessionName, windowIndex } = tmuxManager.parseTerminalId(terminalId);
-      if (!tmuxManager.isAttached(sessionName, windowIndex)) {
+      const client = clients.get(clientId);
+      
+      // Use the client session name if available (for grouped session support)
+      const clientSessionName = client?.clientSessionName || tmuxManager.generateClientSessionName(sessionName, clientId);
+      
+      if (!tmuxManager.isAttached(clientSessionName, windowIndex)) {
         ws.send(JSON.stringify({
           type: 'terminalError',
           terminalId,
@@ -1015,7 +1019,8 @@ function handleTerminalInput(clientId, ws, message) {
         }));
         return;
       }
-      tmuxManager.writeToWindow(sessionName, windowIndex, data);
+      // Write to the client session - the input goes to the shared window
+      tmuxManager.writeToWindow(clientSessionName, windowIndex, data);
     } catch (error) {
       ws.send(JSON.stringify({
         type: 'terminalError',
@@ -1075,8 +1080,11 @@ function handleTerminalResize(clientId, ws, message) {
   if (tmuxManager.isTmuxTerminal(terminalId)) {
     try {
       const { sessionName, windowIndex } = tmuxManager.parseTerminalId(terminalId);
-      if (tmuxManager.isAttached(sessionName, windowIndex)) {
-        tmuxManager.resizeWindow(sessionName, windowIndex, cols, rows);
+      const client = clients.get(clientId);
+      const clientSessionName = client?.clientSessionName || tmuxManager.generateClientSessionName(sessionName, clientId);
+      
+      if (tmuxManager.isAttached(clientSessionName, windowIndex)) {
+        tmuxManager.resizeWindow(clientSessionName, windowIndex, cols, rows);
       }
     } catch (error) {
       ws.send(JSON.stringify({
@@ -1182,338 +1190,4 @@ function handleTerminalKill(clientId, ws, message) {
     terminalId,
     message: 'Cannot kill Cursor IDE terminals from here'
   }));
-}
-
-// ============ Chat Session Handlers ============
-
-/**
- * Attach to a chat conversation's CLI session
- * Creates a new PTY session if one doesn't exist
- */
-async function handleChatAttach(clientId, ws, message) {
-  const { conversationId, workspaceId } = message;
-  
-  if (!conversationId) {
-    ws.send(JSON.stringify({
-      type: 'chatError',
-      message: 'conversationId is required'
-    }));
-    return;
-  }
-  
-  try {
-    // Get conversation from store
-    const conversation = await mobileChatStore.getConversation(conversationId);
-    
-    if (!conversation) {
-      ws.send(JSON.stringify({
-        type: 'chatError',
-        conversationId,
-        message: 'Conversation not found. Create a conversation first via the REST API.'
-      }));
-      return;
-    }
-    
-    const tool = conversation.tool || 'cursor-agent';
-    
-    // Get workspace path
-    let workspacePath = null;
-    const wsId = workspaceId || conversation.workspaceId;
-    if (wsId && wsId !== 'global') {
-      const project = await workspaceManager.getProjectDetails(wsId);
-      if (project) {
-        workspacePath = project.path;
-      }
-    }
-    
-    // Get or create CLI session
-    const session = await cliSessionManager.getOrCreate(
-      conversationId,
-      tool,
-      workspacePath,
-      {
-        model: conversation.model,
-        mode: conversation.mode
-      }
-    );
-    
-    // Set up output handler for this client
-    // Handler receives (contentBlocks, rawData, metadata)
-    const outputHandler = (contentBlocks, rawData, metadata) => {
-      const client = clients.get(clientId);
-      if (!client || client.ws.readyState !== 1) return;
-      
-      if (metadata?.sessionEnded) {
-        client.ws.send(JSON.stringify({
-          type: 'chatSessionEnded',
-          conversationId,
-          reason: 'terminated'
-        }));
-        return;
-      }
-      
-      if (metadata?.sessionSuspended) {
-        client.ws.send(JSON.stringify({
-          type: 'chatSessionSuspended',
-          conversationId,
-          reason: metadata.reason || 'unknown'
-        }));
-        return;
-      }
-      
-      // Send parsed content blocks
-      if (contentBlocks && contentBlocks.length > 0) {
-        client.ws.send(JSON.stringify({
-          type: 'chatContentBlocks',
-          conversationId,
-          blocks: contentBlocks,
-          isBuffer: metadata?.isBuffer || false
-        }));
-      }
-      
-      // Also send raw data for terminal display fallback
-      if (rawData) {
-        client.ws.send(JSON.stringify({
-          type: 'chatData',
-          conversationId,
-          data: rawData,
-          isBuffer: metadata?.isBuffer || false
-        }));
-      }
-    };
-    
-    const unsubscribe = cliSessionManager.attachOutputHandler(conversationId, outputHandler);
-    
-    // Track subscription
-    if (!chatSubscribers.has(conversationId)) {
-      chatSubscribers.set(conversationId, new Set());
-    }
-    chatSubscribers.get(conversationId).add({ clientId, unsubscribe });
-    
-    // Send attach confirmation
-    ws.send(JSON.stringify({
-      type: 'chatAttached',
-      conversationId,
-      tool,
-      isNew: session.isNew,
-      workspacePath,
-      message: session.isNew 
-        ? 'New CLI session started' 
-        : 'Attached to existing CLI session'
-    }));
-    
-    logger.info('WebSocket', 'Client attached to chat', { clientId, conversationId, tool });
-    
-  } catch (error) {
-    logger.error('WebSocket', 'Error attaching to chat', { clientId, conversationId, error: error.message });
-    ws.send(JSON.stringify({
-      type: 'chatError',
-      conversationId,
-      message: error.message
-    }));
-  }
-}
-
-/**
- * Detach from a chat conversation
- */
-function handleChatDetach(clientId, message) {
-  const { conversationId } = message;
-  
-  if (!conversationId) return;
-  
-  const subscribers = chatSubscribers.get(conversationId);
-  if (subscribers) {
-    const clientSub = [...subscribers].find(s => s.clientId === clientId);
-    if (clientSub) {
-      if (clientSub.unsubscribe) {
-        clientSub.unsubscribe();
-      }
-      subscribers.delete(clientSub);
-      if (subscribers.size === 0) {
-        chatSubscribers.delete(conversationId);
-      }
-    }
-  }
-  
-  logger.debug('WebSocket', 'Client detached from chat', { clientId, conversationId });
-}
-
-/**
- * Send a message to a chat conversation
- */
-async function handleChatMessage(clientId, ws, message) {
-  const { conversationId, content, workspaceId } = message;
-  
-  if (!conversationId) {
-    ws.send(JSON.stringify({
-      type: 'chatError',
-      message: 'conversationId is required'
-    }));
-    return;
-  }
-  
-  if (!content || content.trim() === '') {
-    ws.send(JSON.stringify({
-      type: 'chatError',
-      conversationId,
-      message: 'Message content cannot be empty'
-    }));
-    return;
-  }
-  
-  try {
-    // Get conversation from store
-    const conversation = await mobileChatStore.getConversation(conversationId);
-    
-    if (!conversation) {
-      ws.send(JSON.stringify({
-        type: 'chatError',
-        conversationId,
-        message: 'Conversation not found'
-      }));
-      return;
-    }
-    
-    const tool = conversation.tool || 'cursor-agent';
-    
-    // Get workspace path
-    let workspacePath = null;
-    const wsId = workspaceId || conversation.workspaceId;
-    if (wsId && wsId !== 'global') {
-      const project = await workspaceManager.getProjectDetails(wsId);
-      if (project) {
-        workspacePath = project.path;
-      }
-    }
-    
-    // Ensure session exists (creates if needed)
-    const session = await cliSessionManager.getOrCreate(
-      conversationId,
-      tool,
-      workspacePath,
-      {
-        model: conversation.model,
-        mode: conversation.mode
-      }
-    );
-    
-    // If this is a new session and client isn't attached, attach them
-    const subscribers = chatSubscribers.get(conversationId);
-    const isAttached = subscribers && [...subscribers].some(s => s.clientId === clientId);
-    
-    if (!isAttached) {
-      // Auto-attach the client
-      const outputHandler = (contentBlocks, rawData, metadata) => {
-        const client = clients.get(clientId);
-        if (!client || client.ws.readyState !== 1) return;
-        
-        if (metadata?.sessionEnded || metadata?.sessionSuspended) {
-          client.ws.send(JSON.stringify({
-            type: metadata.sessionEnded ? 'chatSessionEnded' : 'chatSessionSuspended',
-            conversationId,
-            reason: metadata.reason || 'unknown'
-          }));
-          return;
-        }
-        
-        // Send parsed content blocks
-        if (contentBlocks && contentBlocks.length > 0) {
-          client.ws.send(JSON.stringify({
-            type: 'chatContentBlocks',
-            conversationId,
-            blocks: contentBlocks,
-            isBuffer: metadata?.isBuffer || false
-          }));
-        }
-        
-        // Also send raw data for terminal display fallback
-        if (rawData) {
-          client.ws.send(JSON.stringify({
-            type: 'chatData',
-            conversationId,
-            data: rawData,
-            isBuffer: metadata?.isBuffer || false
-          }));
-        }
-      };
-      
-      const unsubscribe = cliSessionManager.attachOutputHandler(conversationId, outputHandler);
-      
-      if (!chatSubscribers.has(conversationId)) {
-        chatSubscribers.set(conversationId, new Set());
-      }
-      chatSubscribers.get(conversationId).add({ clientId, unsubscribe });
-    }
-    
-    // Save user message to store
-    const userMessageId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await mobileChatStore.addMessage(conversationId, {
-      id: userMessageId,
-      type: 'user',
-      text: content.trim(),
-      timestamp: Date.now()
-    });
-    
-    // Send input to CLI
-    await cliSessionManager.sendInput(conversationId, content.trim());
-    
-    // Confirm message sent
-    ws.send(JSON.stringify({
-      type: 'chatMessageSent',
-      conversationId,
-      messageId: userMessageId
-    }));
-    
-    logger.info('WebSocket', 'Chat message sent', { clientId, conversationId, contentLength: content.length });
-    
-  } catch (error) {
-    logger.error('WebSocket', 'Error sending chat message', { clientId, conversationId, error: error.message });
-    ws.send(JSON.stringify({
-      type: 'chatError',
-      conversationId,
-      message: error.message
-    }));
-  }
-}
-
-/**
- * Cancel/interrupt a chat session
- */
-async function handleChatCancel(clientId, ws, message) {
-  const { conversationId } = message;
-  
-  if (!conversationId) {
-    ws.send(JSON.stringify({
-      type: 'chatError',
-      message: 'conversationId is required'
-    }));
-    return;
-  }
-  
-  try {
-    // Send Ctrl+C to interrupt
-    const session = cliSessionManager.getSession(conversationId);
-    if (session && session.isActive) {
-      await cliSessionManager.sendInput(conversationId, '\x03'); // Ctrl+C
-      
-      ws.send(JSON.stringify({
-        type: 'chatCancelled',
-        conversationId,
-        message: 'Interrupt signal sent'
-      }));
-    } else {
-      ws.send(JSON.stringify({
-        type: 'chatError',
-        conversationId,
-        message: 'No active session to cancel'
-      }));
-    }
-  } catch (error) {
-    ws.send(JSON.stringify({
-      type: 'chatError',
-      conversationId,
-      message: error.message
-    }));
-  }
 }

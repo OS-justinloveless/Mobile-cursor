@@ -11,13 +11,12 @@ struct MainTabView: View {
     // Track when terminal view is active (to hide tab bar)
     @State private var isTerminalViewActive = false
     
-    // New chat state
+    // New chat state (now opens terminal for tmux chat windows)
     @State private var isCreatingChat = false
-    @State private var newChatId: String?
-    @State private var newChatModelId: String?
-    @State private var newChatMode: ChatMode = .agent
-    @State private var newInitialMessage: String = ""
     @State private var showNewChatSheet = false
+    @State private var navigateToTerminal = false
+    @State private var terminalNavigationId: String?
+    @State private var terminalNavigationProjectPath: String?
     
     // Track if we've attempted to restore the last project
     @State private var hasAttemptedProjectRestore = false
@@ -166,12 +165,12 @@ struct MainTabView: View {
         }
         .ignoresSafeArea(edges: .bottom)
         .sheet(isPresented: $showNewChatSheet) {
-            NewChatSheet(project: project) { chatId, initialMessage, modelId, mode in
-                newChatModelId = modelId
-                newChatMode = mode
-                newInitialMessage = initialMessage
-                selectedTab = 3  // Switch to chat tab
-                newChatId = chatId
+            NewChatSheet(project: project) { terminalId, projectPath in
+                // Navigate to terminal view for the new chat window
+                terminalNavigationId = terminalId
+                terminalNavigationProjectPath = projectPath
+                selectedTab = 1  // Switch to terminals tab
+                navigateToTerminal = true
             }
         }
         .sheet(isPresented: $showSettings) {
@@ -219,6 +218,12 @@ struct MainTabView: View {
                         Color.clear.frame(height: 80)
                     }
                 }
+                .navigationDestination(isPresented: $navigateToTerminal) {
+                    if let terminalId = terminalNavigationId,
+                       let projectPath = terminalNavigationProjectPath {
+                        TerminalView(terminalId: terminalId, projectPath: projectPath)
+                    }
+                }
         }
     }
     
@@ -246,28 +251,6 @@ struct MainTabView: View {
                 }
                 .safeAreaInset(edge: .bottom) {
                     Color.clear.frame(height: 80)
-                }
-                .navigationDestination(item: $newChatId) { chatId in
-                    ChatSessionView(
-                        conversation: Conversation(
-                            id: chatId,
-                            type: "chat",
-                            title: "New Chat",
-                            timestamp: Date().timeIntervalSince1970 * 1000,
-                            messageCount: 0,
-                            workspaceId: project.id,
-                            source: "mobile",
-                            projectName: project.name,
-                            workspaceFolder: project.path,
-                            isProjectChat: true,
-                            tool: nil,
-                            isReadOnly: false,
-                            readOnlyReason: nil,
-                            canFork: false
-                        ),
-                        workspaceId: project.id,
-                        initialMessage: newInitialMessage
-                    )
                 }
         }
     }
@@ -398,37 +381,6 @@ struct MainTabView: View {
         }
     }
     
-    // MARK: - New Chat
-    
-    private func createNewChat(for project: Project) {
-        guard !isCreatingChat else { return }
-        isCreatingChat = true
-        
-        Task {
-            guard let api = authManager.createAPIService() else {
-                await MainActor.run {
-                    isCreatingChat = false
-                }
-                return
-            }
-            
-            do {
-                let chatId = try await api.createConversation(workspaceId: project.id)
-                await MainActor.run {
-                    isCreatingChat = false
-                    // Switch to chat tab and navigate to the new conversation
-                    selectedTab = 3
-                    newChatId = chatId
-                }
-            } catch {
-                await MainActor.run {
-                    isCreatingChat = false
-                    // Could show an error alert here if needed
-                    print("Failed to create chat: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
 }
 
 // MARK: - Previews

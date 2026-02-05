@@ -1,136 +1,85 @@
 import SwiftUI
 
+/// View that lists chat windows (tmux windows running AI CLIs) for a project
 struct ProjectConversationsView: View {
     @EnvironmentObject var authManager: AuthManager
     
     let project: Project
     
-    @State private var conversations: [Conversation] = []
+    @State private var chats: [ChatWindow] = []
     @State private var isLoading = true
     @State private var error: String?
-    @State private var selectedConversation: Conversation?
-    @State private var isCreatingChat = false
-    @State private var newChatId: String?
-    @State private var newChatModelId: String?
-    @State private var newChatMode: ChatMode = .agent
-    @State private var newInitialMessage: String = ""
     @State private var searchText = ""
-    @State private var hideReadOnly = false
     @State private var showNewChatSheet = false
     
-    /// Conversations filtered to exclude empty ones (0 messages) and apply search/filter
-    private var filteredConversations: [Conversation] {
-        var result = conversations.filter { $0.messageCount > 0 }
-        
-        // Filter out read-only if enabled
-        if hideReadOnly {
-            result = result.filter { !$0.isReadOnlyConversation }
-        }
-        
-        // Filter by search text
-        if !searchText.isEmpty {
-            let lowercasedSearch = searchText.lowercased()
-            result = result.filter { conversation in
-                // Search in title
-                if conversation.title.lowercased().contains(lowercasedSearch) {
-                    return true
-                }
-                // Search in project name
-                if let projectName = conversation.projectName,
-                   projectName.lowercased().contains(lowercasedSearch) {
-                    return true
-                }
-                // Search in type
-                if conversation.type.lowercased().contains(lowercasedSearch) {
-                    return true
-                }
-                return false
-            }
-        }
-        
-        return result
-    }
+    // Navigation state for terminal
+    @State private var selectedTerminalId: String?
+    @State private var selectedProjectPath: String?
     
-    /// Non-empty conversations count (before search/filter)
-    private var totalNonEmptyCount: Int {
-        conversations.filter { $0.messageCount > 0 }.count
+    /// Filter chats by search text
+    private var filteredChats: [ChatWindow] {
+        guard !searchText.isEmpty else { return chats }
+        let lowercasedSearch = searchText.lowercased()
+        return chats.filter { chat in
+            chat.windowName.lowercased().contains(lowercasedSearch) ||
+            chat.tool.lowercased().contains(lowercasedSearch) ||
+            chat.displayTitle.lowercased().contains(lowercasedSearch)
+        }
     }
     
     var body: some View {
         VStack(spacing: 0) {
             // Search bar
-            searchBar
+            if !chats.isEmpty {
+                searchBar
+            }
             
             // Content
             if isLoading {
                 Spacer()
-                ProgressView("Loading conversations...")
+                ProgressView("Loading chats...")
                 Spacer()
             } else if let error = error {
                 Spacer()
                 ErrorView(message: error) {
-                    loadConversations()
+                    loadChats()
                 }
                 Spacer()
-            } else if totalNonEmptyCount == 0 {
-                // No conversations at all
+            } else if chats.isEmpty {
                 emptyStateWithNewChat
-            } else if filteredConversations.isEmpty {
-                // Have conversations but filter/search yields no results
+            } else if filteredChats.isEmpty {
                 filteredEmptyState
             } else {
-                conversationsList
+                chatsList
             }
         }
-        .navigationDestination(item: $selectedConversation) { conversation in
-            ConversationDetailView(conversation: conversation)
-        }
-        .navigationDestination(item: $newChatId) { chatId in
-            // Navigate to the new chat using ChatSessionView (WebSocket-based)
-            // This allows for real-time streaming and proper CLI session handling
-            ChatSessionView(
-                conversation: Conversation(
-                    id: chatId,
-                    type: "chat",
-                    title: "New Chat",
-                    timestamp: Date().timeIntervalSince1970 * 1000,
-                    messageCount: 0,
-                    workspaceId: project.id,
-                    source: "mobile",
-                    projectName: project.name,
-                    workspaceFolder: project.path,
-                    isProjectChat: true,
-                    tool: nil,
-                    isReadOnly: false,
-                    readOnlyReason: nil,
-                    canFork: false
-                ),
-                workspaceId: project.id,
-                initialMessage: newInitialMessage
-            )
+        .navigationDestination(item: $selectedTerminalId) { terminalId in
+            if let projectPath = selectedProjectPath {
+                TerminalView(terminalId: terminalId, projectPath: projectPath)
+            }
         }
         .sheet(isPresented: $showNewChatSheet) {
-            NewChatSheet(project: project) { chatId, initialMessage, modelId, mode in
-                newChatModelId = modelId
-                newChatMode = mode
-                newChatId = chatId
-                newInitialMessage = initialMessage
+            NewChatSheet(project: project) { terminalId, projectPath in
+                // Navigate to terminal view for the new chat
+                selectedTerminalId = terminalId
+                selectedProjectPath = projectPath
+                // Refresh the list in the background so it's ready when user returns
+                loadChats()
             }
         }
         .onAppear {
-            if conversations.isEmpty {
-                loadConversations()
-            }
+            // Always refresh when view appears (user might be returning from terminal)
+            loadChats()
         }
         .onChange(of: project.id) { _, _ in
             // Reset state when project changes
-            conversations = []
-            selectedConversation = nil
-            newChatId = nil
+            chats = []
+            selectedTerminalId = nil
+            selectedProjectPath = nil
             isLoading = true
             error = nil
             searchText = ""
-            loadConversations()
+            loadChats()
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -142,7 +91,7 @@ struct ProjectConversationsView: View {
                     }
                     
                     Button {
-                        loadConversations()
+                        loadChats()
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -153,24 +102,11 @@ struct ProjectConversationsView: View {
     
     private var searchBar: some View {
         HStack(spacing: 8) {
-            // Filter button
-            Menu {
-                Toggle(isOn: $hideReadOnly) {
-                    Label("Hide Read-Only", systemImage: hideReadOnly ? "eye.slash.fill" : "eye.slash")
-                }
-            } label: {
-                Image(systemName: hideReadOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 20))
-                    .foregroundColor(hideReadOnly ? .accentColor : .secondary)
-                    .frame(width: 36, height: 36)
-            }
-            
-            // Search field
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
                 
-                TextField("Search conversations...", text: $searchText)
+                TextField("Search chats...", text: $searchText)
                     .textFieldStyle(.plain)
                 
                 if !searchText.isEmpty {
@@ -203,22 +139,11 @@ struct ProjectConversationsView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            Text(hideReadOnly 
-                ? "No editable conversations match your search. Try adjusting the filter."
-                : "No conversations match your search.")
+            Text("No chats match your search.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
-            
-            if hideReadOnly {
-                Button {
-                    hideReadOnly = false
-                } label: {
-                    Text("Show All Conversations")
-                        .font(.subheadline)
-                }
-            }
             
             Spacer()
         }
@@ -229,21 +154,15 @@ struct ProjectConversationsView: View {
         VStack(spacing: 20) {
             EmptyStateView(
                 icon: "bubble.left.and.bubble.right",
-                title: "No Conversations",
+                title: "No Chat Windows",
                 message: "Start a new AI chat session for this project"
             )
             
             Button {
-                createNewChat()
+                showNewChatSheet = true
             } label: {
                 HStack {
-                    if isCreatingChat {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
-                            .tint(.white)
-                    } else {
-                        Image(systemName: "plus.bubble.fill")
-                    }
+                    Image(systemName: "plus.bubble.fill")
                     Text("New Chat")
                 }
                 .font(.headline)
@@ -253,116 +172,160 @@ struct ProjectConversationsView: View {
                 .background(Color.accentColor)
                 .cornerRadius(12)
             }
-            .disabled(isCreatingChat)
         }
     }
     
-    private var conversationsList: some View {
+    private var chatsList: some View {
         List {
             // Show filter status if active
-            if hideReadOnly || !searchText.isEmpty {
+            if !searchText.isEmpty {
                 HStack {
-                    Text("Showing \(filteredConversations.count) of \(totalNonEmptyCount)")
+                    Text("Showing \(filteredChats.count) of \(chats.count)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
                     Spacer()
-                    
-                    if hideReadOnly {
-                        Text("Editable only")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.2))
-                            .foregroundColor(.accentColor)
-                            .cornerRadius(4)
-                    }
                 }
                 .listRowBackground(Color.clear)
             }
             
-            ForEach(filteredConversations) { conversation in
-                ConversationRow(conversation: conversation) {
-                    selectedConversation = conversation
+            ForEach(filteredChats) { chat in
+                ChatWindowRow(chat: chat) {
+                    selectedTerminalId = chat.id
+                    selectedProjectPath = chat.projectPath
                 }
             }
+            .onDelete(perform: deleteChats)
         }
         .refreshable {
-            await refreshConversations()
+            await refreshChats()
         }
     }
     
-    private func loadConversations() {
-        // Try to load from cache first
-        if let cached = CacheManager.shared.loadProjectConversations(projectId: project.id) {
-            conversations = cached.data
-            isLoading = false
-            error = nil
-            print("[ProjectConversationsView] Loaded \(conversations.count) conversations from cache")
-        } else {
-            isLoading = true
-        }
-        
+    private func loadChats() {
+        isLoading = true
         error = nil
         
-        // Fetch fresh data in the background
         Task {
-            await refreshConversations()
-            isLoading = false
+            await refreshChats()
+            await MainActor.run {
+                isLoading = false
+            }
         }
     }
     
-    private func refreshConversations() async {
+    private func refreshChats() async {
         guard let api = authManager.createAPIService() else {
-            error = "Not authenticated"
+            await MainActor.run {
+                error = "Not authenticated"
+            }
             return
         }
         
         do {
-            let freshConversations = try await api.getProjectConversations(projectId: project.id)
-            conversations = freshConversations
-            error = nil
-            
-            // Save to cache
-            CacheManager.shared.saveProjectConversations(freshConversations, projectId: project.id)
-            print("[ProjectConversationsView] Fetched and cached \(freshConversations.count) conversations")
+            let fetchedChats = try await api.getChats(projectPath: project.path)
+            await MainActor.run {
+                chats = fetchedChats
+                error = nil
+            }
+            print("[ProjectConversationsView] Fetched \(fetchedChats.count) chat windows")
         } catch {
-            // Only show error if we don't have cached data
-            if conversations.isEmpty {
-                self.error = error.localizedDescription
-            } else {
-                print("[ProjectConversationsView] Failed to refresh conversations, using cached data: \(error)")
+            await MainActor.run {
+                if chats.isEmpty {
+                    self.error = error.localizedDescription
+                } else {
+                    print("[ProjectConversationsView] Failed to refresh chats: \(error)")
+                }
             }
         }
     }
     
-    private func createNewChat() {
-        isCreatingChat = true
-        error = nil
+    private func deleteChats(at offsets: IndexSet) {
+        guard let api = authManager.createAPIService() else { return }
+        
+        let chatsToDelete = offsets.map { filteredChats[$0] }
         
         Task {
-            guard let api = authManager.createAPIService() else {
-                await MainActor.run {
-                    error = "Not authenticated"
-                    isCreatingChat = false
-                }
-                return
-            }
-            
-            do {
-                let chatId = try await api.createConversation(workspaceId: project.id)
-                await MainActor.run {
-                    isCreatingChat = false
-                    // Navigate to the new chat
-                    newChatId = chatId
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = "Failed to create chat: \(error.localizedDescription)"
-                    isCreatingChat = false
+            for chat in chatsToDelete {
+                do {
+                    try await api.deleteChatWindow(terminalId: chat.id)
+                    await MainActor.run {
+                        chats.removeAll { $0.id == chat.id }
+                    }
+                } catch {
+                    print("[ProjectConversationsView] Failed to delete chat \(chat.id): \(error)")
                 }
             }
         }
+    }
+}
+
+// MARK: - Chat Window Row (uses ChatWindow from Conversation.swift)
+
+struct ChatWindowRow: View {
+    let chat: ChatWindow
+    let onTap: () -> Void
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                // Tool icon
+                ZStack {
+                    Circle()
+                        .fill(toolColor.opacity(0.15))
+                        .frame(width: 44, height: 44)
+                    
+                    Image(systemName: chat.toolIcon)
+                        .font(.title3)
+                        .foregroundColor(toolColor)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(chat.displayTitle)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    
+                    HStack(spacing: 8) {
+                        // Tool badge
+                        Text(toolName)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(toolColor.opacity(0.15))
+                            .foregroundColor(toolColor)
+                            .cornerRadius(4)
+                        
+                        // Window name
+                        Text(chat.windowName)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                
+                Spacer()
+                
+                // Status indicator
+                Circle()
+                    .fill(chat.active ? Color.green : Color.gray)
+                    .frame(width: 8, height: 8)
+                
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private var toolColor: Color {
+        chat.toolEnum?.color ?? .gray
+    }
+    
+    private var toolName: String {
+        chat.toolEnum?.displayName ?? chat.tool
     }
 }
 

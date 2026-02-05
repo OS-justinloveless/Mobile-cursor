@@ -576,8 +576,32 @@ class APIService {
         }
     }
     
-    // MARK: - Conversations
+    // MARK: - Chat Windows (Tmux-based chats)
     
+    /// Get all chat windows (tmux windows running AI CLIs)
+    /// - Parameter projectPath: Optional project path to filter chats
+    /// - Returns: Array of ChatWindow objects
+    func getChats(projectPath: String? = nil) async throws -> [ChatWindow] {
+        var endpoint = "/api/conversations"
+        if let projectPath = projectPath {
+            endpoint += "?projectPath=\(projectPath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? projectPath)"
+        }
+        
+        let data = try await makeRequest(endpoint: endpoint)
+        
+        do {
+            let response = try decoder.decode(ChatsResponse.self, from: data)
+            return response.chats
+        } catch {
+            // Try to decode as conversations array for backwards compatibility
+            print("[getChats] Failed to decode as ChatsResponse, error: \(error)")
+            return []
+        }
+    }
+    
+    // MARK: - Conversations (Legacy)
+    
+    @available(*, deprecated, message: "Use getChats() instead")
     func getConversations() async throws -> [Conversation] {
         let data = try await makeRequest(endpoint: "/api/conversations")
         
@@ -859,39 +883,85 @@ class APIService {
         }
     }
     
-    /// Create a new conversation, optionally within a specific project/workspace
+    /// Create a new chat window (tmux window running AI CLI)
     /// - Parameters:
-    ///   - workspaceId: The workspace/project ID to create the conversation in. Use nil or "global" for global conversations.
-    ///   - model: The AI model to use (e.g., "sonnet-4.5", "gpt-5.2"). Pass nil for default.
+    ///   - projectId: The project ID to create the chat in
+    ///   - projectPath: The project path (alternative to projectId)
+    ///   - tool: The AI CLI tool to use (cursor-agent, claude, gemini). Defaults to claude.
+    ///   - topic: Optional topic/name for the chat window
+    ///   - model: The AI model to use. Pass nil for default.
     ///   - mode: The execution mode (agent, plan, ask). Defaults to agent.
-    ///   - tool: The AI CLI tool to use (cursor-agent, claude, gemini). Defaults to cursor-agent.
-    /// - Returns: The ID of the newly created conversation
-    func createConversation(workspaceId: String? = nil, model: String? = nil, mode: ChatMode? = nil, tool: String = "cursor-agent") async throws -> String {
-        logAsync(.info, "API", "Creating conversation", data: ["workspaceId": workspaceId ?? "global", "tool": tool, "model": model ?? "default"])
+    ///   - initialPrompt: Optional initial message to send after CLI starts
+    /// - Returns: ChatWindowResponse with terminal ID and window info
+    func createChatWindow(
+        projectId: String,
+        projectPath: String? = nil,
+        tool: String = "claude",
+        topic: String? = nil,
+        model: String? = nil,
+        mode: ChatMode = .agent,
+        initialPrompt: String? = nil
+    ) async throws -> ChatWindowResponse {
+        logAsync(.info, "API", "Creating chat window", data: ["projectId": projectId, "tool": tool, "topic": topic ?? "auto"])
         
-        var bodyDict: [String: Any] = [:]
-        if let workspaceId = workspaceId, workspaceId != "global" {
-            bodyDict["workspaceId"] = workspaceId
+        var bodyDict: [String: Any] = [
+            "projectId": projectId,
+            "tool": tool,
+            "mode": mode.rawValue
+        ]
+        
+        if let projectPath = projectPath {
+            bodyDict["projectPath"] = projectPath
+        }
+        if let topic = topic, !topic.isEmpty {
+            bodyDict["topic"] = topic
         }
         if let model = model {
             bodyDict["model"] = model
         }
-        if let mode = mode {
-            bodyDict["mode"] = mode.rawValue
+        if let initialPrompt = initialPrompt, !initialPrompt.isEmpty {
+            bodyDict["initialPrompt"] = initialPrompt
         }
-        bodyDict["tool"] = tool
 
         let body = try JSONSerialization.data(withJSONObject: bodyDict)
         
         do {
             let data = try await makeRequest(endpoint: "/api/conversations", method: "POST", body: body)
-            let response = try decoder.decode(CreateConversationResponse.self, from: data)
-            logAsync(.info, "API", "Conversation created", data: ["chatId": response.chatId])
-            return response.chatId
+            let response = try decoder.decode(ChatWindowResponse.self, from: data)
+            logAsync(.info, "API", "Chat window created", data: ["terminalId": response.terminalId])
+            return response
         } catch {
-            logAsync(.error, "API", "Failed to create conversation", data: ["error": error.localizedDescription])
+            logAsync(.error, "API", "Failed to create chat window", data: ["error": error.localizedDescription])
             throw error
         }
+    }
+    
+    /// Delete/close a chat window
+    /// - Parameter terminalId: The terminal ID of the chat window to close
+    func deleteChatWindow(terminalId: String) async throws {
+        logAsync(.info, "API", "Deleting chat window", data: ["terminalId": terminalId])
+        
+        let encodedId = terminalId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? terminalId
+        
+        do {
+            _ = try await makeRequest(endpoint: "/api/conversations/\(encodedId)", method: "DELETE")
+            logAsync(.info, "API", "Chat window deleted", data: ["terminalId": terminalId])
+        } catch {
+            logAsync(.error, "API", "Failed to delete chat window", data: ["error": error.localizedDescription])
+            throw error
+        }
+    }
+    
+    /// Legacy method - redirects to createChatWindow
+    @available(*, deprecated, message: "Use createChatWindow instead")
+    func createConversation(workspaceId: String? = nil, model: String? = nil, mode: ChatMode? = nil, tool: String = "cursor-agent") async throws -> String {
+        let response = try await createChatWindow(
+            projectId: workspaceId ?? "global",
+            tool: tool,
+            model: model,
+            mode: mode ?? .agent
+        )
+        return response.terminalId
     }
     
     /// Get tool availability status from the server

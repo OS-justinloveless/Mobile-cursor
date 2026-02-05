@@ -1,11 +1,12 @@
 import SwiftUI
 
-/// Sheet for creating a new chat conversation with an initial message
+/// Sheet for creating a new chat window (tmux window running AI CLI)
 struct NewChatSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var authManager: AuthManager
     
-    @State private var message = ""
+    @State private var topic = ""
+    @State private var initialPrompt = ""
     @State private var isCreating = false
     @State private var error: String?
     
@@ -17,16 +18,17 @@ struct NewChatSheet: View {
     @State private var showOptions = false
 
     // Tool selection
-    @State private var selectedTool: ChatTool = .cursorAgent
+    @State private var selectedTool: ChatTool = .claude  // Default to Claude
     @State private var toolAvailability: [ChatTool: Bool] = [:]
     @State private var isLoadingTools = true
 
-    @FocusState private var isMessageFocused: Bool
+    @FocusState private var isTopicFocused: Bool
 
     let project: Project
-    let onChatCreated: (String, String, String?, ChatMode) -> Void  // (chatId, initialMessage, model, mode)
+    /// Callback when chat window is created - (terminalId, projectPath)
+    let onChatCreated: (String, String) -> Void
     
-    init(project: Project, onChatCreated: @escaping (String, String, String?, ChatMode) -> Void) {
+    init(project: Project, onChatCreated: @escaping (String, String) -> Void) {
         self.project = project
         self.onChatCreated = onChatCreated
         // Initialize with defaults from ChatSettingsManager
@@ -46,12 +48,29 @@ struct NewChatSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Message input area
-                TextEditor(text: $message)
-                    .focused($isMessageFocused)
-                    .padding()
-                    .scrollContentBackground(.hidden)
-                    .background(Color(.systemBackground))
+                // Topic input
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Topic (optional)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    TextField("e.g., auth-refactor, bug-fix", text: $topic)
+                        .focused($isTopicFocused)
+                        .textFieldStyle(.roundedBorder)
+                }
+                .padding()
+                
+                // Initial prompt (optional)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Initial prompt (optional)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    TextEditor(text: $initialPrompt)
+                        .frame(minHeight: 100, maxHeight: 200)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(8)
+                }
+                .padding(.horizontal)
                 
                 // Error message if any
                 if let error = error {
@@ -64,8 +83,7 @@ struct NewChatSheet: View {
                         Spacer()
                     }
                     .padding(.horizontal)
-                    .padding(.bottom, 8)
-                    .background(Color(.systemBackground))
+                    .padding(.top, 8)
                 }
                 
                 Divider()
@@ -239,18 +257,17 @@ struct NewChatSheet: View {
                     if isCreating {
                         ProgressView()
                     } else {
-                        Button("Send") {
+                        Button("Create") {
                             createChat()
                         }
                         .fontWeight(.semibold)
-                        .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
             }
             .interactiveDismissDisabled(isCreating)
         }
         .onAppear {
-            isMessageFocused = true
+            isTopicFocused = true
             loadModels()
             loadToolAvailability()
         }
@@ -324,11 +341,11 @@ struct NewChatSheet: View {
     }
     
     private func createChat() {
-        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedMessage.isEmpty else { return }
-        
         isCreating = true
         error = nil
+        
+        let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPrompt = initialPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         
         Task {
             guard let api = authManager.createAPIService() else {
@@ -340,19 +357,22 @@ struct NewChatSheet: View {
             }
             
             do {
-                // Create the conversation with tool, model, and mode
-                let chatId = try await api.createConversation(
-                    workspaceId: project.id,
+                // Create a tmux chat window
+                let response = try await api.createChatWindow(
+                    projectId: project.id,
+                    projectPath: project.path,
+                    tool: selectedTool.rawValue,
+                    topic: trimmedTopic.isEmpty ? nil : trimmedTopic,
                     model: selectedModelId,
                     mode: selectedMode,
-                    tool: selectedTool.rawValue
+                    initialPrompt: trimmedPrompt.isEmpty ? nil : trimmedPrompt
                 )
                 
                 await MainActor.run {
                     isCreating = false
                     dismiss()
-                    // Pass chatId, initial message, model, and mode
-                    onChatCreated(chatId, trimmedMessage, selectedModelId, selectedMode)
+                    // Navigate to terminal view with the new chat window
+                    onChatCreated(response.terminalId, project.path)
                 }
             } catch {
                 await MainActor.run {
@@ -372,7 +392,7 @@ struct NewChatSheet: View {
             path: "/path/to/project",
             lastOpened: Date()
         ),
-        onChatCreated: { _, _, _, _ in }
+        onChatCreated: { _, _ in }
     )
     .environmentObject(AuthManager())
 }

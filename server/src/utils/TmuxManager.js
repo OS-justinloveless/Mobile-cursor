@@ -7,17 +7,26 @@ import os from 'os';
 /**
  * Manages tmux sessions for mobile terminal access
  * 
- * Architecture: One session per project, multiple windows per session
+ * Architecture: One base session per project, with grouped client sessions for each connected client
  * 
- * Sessions are named: mobile-{projectDirName}
- * Terminal IDs are: tmux-{sessionName}:{windowIndex}
+ * Base Sessions: mobile-{projectDirName}
+ * Client Sessions: mobile-{projectDirName}-client-{clientId}
+ * Terminal IDs: tmux-{sessionName}:{windowIndex}
+ * 
+ * Grouped Session Architecture:
+ * - Base session holds all windows (terminals, chats)
+ * - Each client (mobile app, desktop) gets their own "client session"
+ * - Client sessions are grouped with the base session (tmux -t option)
+ * - Grouped sessions share windows but have independent views
+ * - Mobile creating a new window doesn't switch desktop's active window
+ * - Each client can navigate windows independently
  * 
  * Benefits:
- * - Clean organization (one session per project)
+ * - Clean organization (one base session per project)
  * - Sessions persist even when mobile app disconnects
- * - Sessions can be accessed from desktop via `tmux attach -t mobile-{project}`
+ * - Multiple clients can view/interact without affecting each other
+ * - Desktop users can attach via `tmux new-session -t mobile-{project}` for independent view
  * - Multiple windows per project (like tabs)
- * - Desktop users can switch windows with Ctrl+B n/p
  */
 export class TmuxManager {
   constructor() {
@@ -82,7 +91,49 @@ export class TmuxManager {
     if (!sessionName.startsWith('mobile-')) {
       return null;
     }
-    return sessionName.substring(7); // Remove 'mobile-' prefix
+    // Remove 'mobile-' prefix and any client suffix (-client-xxx)
+    let name = sessionName.substring(7);
+    const clientSuffixIndex = name.indexOf('-client-');
+    if (clientSuffixIndex !== -1) {
+      name = name.substring(0, clientSuffixIndex);
+    }
+    return name;
+  }
+
+  /**
+   * Check if a session is a client session (grouped session)
+   * @param {string} sessionName - The tmux session name
+   * @returns {boolean}
+   */
+  isClientSession(sessionName) {
+    return sessionName.includes('-client-');
+  }
+
+  /**
+   * Get the base session name from a client session name
+   * @param {string} sessionName - The session name (base or client)
+   * @returns {string} - The base session name
+   */
+  getBaseSessionName(sessionName) {
+    const clientSuffixIndex = sessionName.indexOf('-client-');
+    if (clientSuffixIndex !== -1) {
+      return sessionName.substring(0, clientSuffixIndex);
+    }
+    return sessionName;
+  }
+
+  /**
+   * Generate a client session name
+   * @param {string} baseSessionName - The base session name
+   * @param {string} clientId - Unique client identifier
+   * @returns {string}
+   */
+  generateClientSessionName(baseSessionName, clientId) {
+    // Sanitize clientId
+    const sanitizedClientId = clientId
+      .replace(/[^a-zA-Z0-9_-]/g, '-')
+      .substring(0, 20);
+    return `${baseSessionName}-client-${sanitizedClientId}`;
   }
 
   /**
@@ -244,6 +295,19 @@ export class TmuxManager {
         `tmux new-session -d -s "${sessionName}" -c "${cwd}"`,
         { encoding: 'utf-8', cwd }
       );
+      
+      // Disable mouse mode for mobile sessions to prevent scroll events from
+      // being interpreted as mouse escape sequences (which appear as random text)
+      try {
+        execSync(
+          `tmux set-option -t "${sessionName}" mouse off`,
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        console.log(`[TmuxManager] Disabled mouse mode for session: ${sessionName}`);
+      } catch (mouseErr) {
+        console.warn(`[TmuxManager] Could not disable mouse mode: ${mouseErr.message}`);
+      }
+      
       console.log(`[TmuxManager] Created session: ${sessionName} in ${cwd}`);
       return { name: sessionName, isNew: true };
     } catch (e) {
@@ -256,11 +320,115 @@ export class TmuxManager {
   }
 
   /**
+   * Get or create a client session (grouped session with independent view)
+   * This allows multiple clients (mobile, desktop) to have independent views
+   * while sharing the same windows.
+   * 
+   * @param {string} baseSessionName - The base session name (e.g., mobile-MyProject)
+   * @param {string} clientId - Unique client identifier (e.g., 'mobile-1', 'desktop')
+   * @returns {object} - { name, isNew, baseSession }
+   */
+  getOrCreateClientSession(baseSessionName, clientId) {
+    if (!this.isTmuxAvailable()) {
+      throw new Error('tmux is not installed');
+    }
+
+    // Make sure base session exists
+    if (!this.sessionExists(baseSessionName)) {
+      throw new Error(`Base session ${baseSessionName} does not exist`);
+    }
+
+    const clientSessionName = this.generateClientSessionName(baseSessionName, clientId);
+
+    // Check if client session already exists
+    if (this.sessionExists(clientSessionName)) {
+      console.log(`[TmuxManager] Client session ${clientSessionName} already exists`);
+      return { name: clientSessionName, isNew: false, baseSession: baseSessionName };
+    }
+
+    // Create a grouped session
+    // -t target creates a session grouped with target (shares windows, independent view)
+    try {
+      execSync(
+        `tmux new-session -d -t "${baseSessionName}" -s "${clientSessionName}"`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      console.log(`[TmuxManager] Created grouped client session: ${clientSessionName} -> ${baseSessionName}`);
+      return { name: clientSessionName, isNew: true, baseSession: baseSessionName };
+    } catch (e) {
+      if (e.message.includes('duplicate session')) {
+        return { name: clientSessionName, isNew: false, baseSession: baseSessionName };
+      }
+      throw new Error(`Failed to create client session: ${e.message}`);
+    }
+  }
+
+  /**
+   * Get or create a session for a project, optionally with a client-specific view
+   * @param {string} projectPath - The project path
+   * @param {object} options - Options
+   * @param {string} options.clientId - Optional client ID for grouped session
+   * @returns {object} - Session info with { name, isNew, isClientSession, baseSession }
+   */
+  getOrCreateSessionWithClient(projectPath, options = {}) {
+    // First, ensure base session exists
+    const { name: baseSessionName, isNew: isBaseNew } = this.getOrCreateSession(projectPath, options);
+
+    // If no clientId, just return the base session
+    if (!options.clientId) {
+      return { 
+        name: baseSessionName, 
+        isNew: isBaseNew, 
+        isClientSession: false, 
+        baseSession: baseSessionName 
+      };
+    }
+
+    // Create or get client session
+    const clientResult = this.getOrCreateClientSession(baseSessionName, options.clientId);
+    return {
+      name: clientResult.name,
+      isNew: clientResult.isNew,
+      isClientSession: true,
+      baseSession: baseSessionName
+    };
+  }
+
+  /**
+   * List all client sessions for a base session
+   * @param {string} baseSessionName - The base session name
+   * @returns {Array<object>} - Array of client session info
+   */
+  listClientSessions(baseSessionName) {
+    const allSessions = this.listAllSessions();
+    return allSessions.filter(s => 
+      s.name.startsWith(baseSessionName + '-client-')
+    );
+  }
+
+  /**
+   * Clean up client sessions for a base session (e.g., when base is destroyed)
+   * @param {string} baseSessionName - The base session name
+   */
+  cleanupClientSessions(baseSessionName) {
+    const clientSessions = this.listClientSessions(baseSessionName);
+    for (const session of clientSessions) {
+      try {
+        this.destroySession(session.name);
+        console.log(`[TmuxManager] Cleaned up client session: ${session.name}`);
+      } catch (e) {
+        console.warn(`[TmuxManager] Failed to cleanup client session ${session.name}: ${e.message}`);
+      }
+    }
+  }
+
+  /**
    * Create a new window in a session
    * @param {string} sessionName - The session name
    * @param {object} options - Options
    * @param {string} options.cwd - Working directory
    * @param {string} options.name - Window name (optional)
+   * @param {boolean} options.background - Create in background without switching (default: true)
    * @returns {object} - Window info { sessionName, windowIndex, windowName }
    */
   createWindow(sessionName, options = {}) {
@@ -274,9 +442,10 @@ export class TmuxManager {
 
     const cwd = options.cwd || os.homedir();
     const windowName = options.name || '';
+    const background = options.background !== false; // Default to true
 
-    // Build command
-    let cmd = `tmux new-window -t "${sessionName}" -c "${cwd}"`;
+    // Build command - use -d flag to create in background (doesn't disrupt desktop users)
+    let cmd = `tmux new-window${background ? ' -d' : ''} -t "${sessionName}" -c "${cwd}"`;
     if (windowName) {
       cmd += ` -n "${windowName}"`;
     }
@@ -287,7 +456,7 @@ export class TmuxManager {
       const output = execSync(cmd, { encoding: 'utf-8' }).trim();
       const windowIndex = parseInt(output, 10);
       
-      console.log(`[TmuxManager] Created window ${windowIndex} in session ${sessionName}`);
+      console.log(`[TmuxManager] Created window ${windowIndex} in session ${sessionName}${background ? ' (background)' : ''}`);
       
       return {
         sessionName,
@@ -350,6 +519,267 @@ export class TmuxManager {
       source: 'tmux',
       attached: false
     };
+  }
+
+  /**
+   * Create a chat window that runs an AI CLI tool
+   * 
+   * Chat windows are tmux windows that run AI CLI tools (claude, cursor-agent, gemini)
+   * instead of a regular shell. The window name follows the pattern: chat-{tool}-{topic}
+   * 
+   * @param {object} options - Options
+   * @param {string} options.projectPath - Project path (required)
+   * @param {string} options.tool - CLI tool to run: 'claude', 'cursor-agent', 'gemini' (required)
+   * @param {string} options.topic - Topic/name for the chat (optional, defaults to timestamp)
+   * @param {string} options.model - AI model to use (optional)
+   * @param {string} options.mode - Chat mode: 'agent', 'plan', 'ask' (optional)
+   * @param {string} options.initialPrompt - Initial prompt to send (optional)
+   * @param {string} options.sessionId - Session ID for resume (optional, auto-generated if not provided)
+   * @returns {object} - Chat window info
+   */
+  createChatWindow(options = {}) {
+    console.log('[TmuxManager] createChatWindow called with:', JSON.stringify(options, null, 2));
+    
+    if (!options.projectPath) {
+      throw new Error('projectPath is required');
+    }
+    if (!options.tool) {
+      throw new Error('tool is required');
+    }
+
+    const { projectPath, tool, topic, model, mode, initialPrompt, sessionId } = options;
+    
+    // Validate tool
+    const validTools = ['claude', 'cursor-agent', 'gemini'];
+    if (!validTools.includes(tool)) {
+      throw new Error(`Invalid tool: ${tool}. Must be one of: ${validTools.join(', ')}`);
+    }
+
+    // Generate window name: chat-{tool}-{topic}
+    const sanitizedTopic = topic 
+      ? topic.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 20)
+      : Date.now().toString();
+    const windowName = `chat-${tool}-${sanitizedTopic}`;
+    
+    console.log(`[TmuxManager] Creating chat window: ${windowName} for project: ${projectPath}`);
+    
+    // Generate session ID for CLI resume functionality
+    const chatSessionId = sessionId || `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Get or create the tmux session for this project
+    console.log(`[TmuxManager] Getting or creating session for project...`);
+    const { name: sessionName, isNew: isNewSession } = this.getOrCreateSession(projectPath, { cwd: projectPath });
+    console.log(`[TmuxManager] Session: ${sessionName}, isNew: ${isNewSession}`);
+
+    // Build the CLI command
+    const cliCommand = this.buildCLICommand(tool, {
+      sessionId: chatSessionId,
+      workspacePath: projectPath,
+      model,
+      mode,
+      initialPrompt
+    });
+
+    let windowIndex;
+    
+    if (isNewSession) {
+      // New session already has window 0
+      windowIndex = 0;
+      this.renameWindow(sessionName, 0, windowName);
+    } else {
+      // Create a new window with -d flag to not switch to it (doesn't disrupt desktop users)
+      try {
+        const cmd = `tmux new-window -d -t "${sessionName}" -c "${projectPath}" -n "${windowName}" -P -F "#{window_index}"`;
+        const output = execSync(cmd, { encoding: 'utf-8' }).trim();
+        windowIndex = parseInt(output, 10);
+        console.log(`[TmuxManager] Created chat window ${windowIndex} in session ${sessionName} (background)`);
+      } catch (e) {
+        throw new Error(`Failed to create chat window: ${e.message}`);
+      }
+    }
+    
+    // Send the CLI command to the window
+    // This keeps the window open even if the command fails, allowing users to see the error
+    try {
+      execSync(
+        `tmux send-keys -t "${sessionName}:${windowIndex}" '${cliCommand.replace(/'/g, "'\\''")}' Enter`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      console.log(`[TmuxManager] Sent command to chat window: ${cliCommand}`);
+    } catch (e) {
+      console.error(`[TmuxManager] Error sending command to window: ${e.message}`);
+      // Don't throw - the window is still created, user can debug manually
+    }
+
+    const terminalId = this.buildTerminalId(sessionName, windowIndex);
+    
+    // Verify the window was created
+    const windows = this.listWindows(sessionName);
+    const createdWindow = windows.find(w => w.index === windowIndex);
+    console.log(`[TmuxManager] Verification - Windows in session ${sessionName}:`, windows.map(w => `${w.index}:${w.name}`));
+    console.log(`[TmuxManager] Created window found: ${createdWindow ? 'yes' : 'no'}`);
+    console.log(`[TmuxManager] Terminal ID: ${terminalId}`);
+
+    return {
+      id: terminalId,
+      sessionName,
+      windowIndex,
+      windowName,
+      tool,
+      topic: sanitizedTopic,
+      chatSessionId,
+      model: model || null,
+      mode: mode || 'agent',
+      projectPath,
+      createdAt: Date.now(),
+      active: true,
+      source: 'tmux',
+      type: 'chat',
+      attached: false
+    };
+  }
+
+  /**
+   * Build the CLI command string for an AI tool
+   * @private
+   */
+  buildCLICommand(tool, options = {}) {
+    const { sessionId, workspacePath, model, mode, initialPrompt } = options;
+    
+    let args = [];
+    
+    switch (tool) {
+      case 'claude':
+        // Claude Code CLI
+        // Note: Claude runs in the current directory (set via tmux window's -c option)
+        // There is no --workspace flag
+        if (model) {
+          args.push('--model', model);
+        }
+        // Map our mode to Claude's permission-mode
+        if (mode === 'plan') {
+          args.push('--permission-mode', 'plan');
+        } else if (mode === 'ask') {
+          // 'ask' mode - use plan mode for read-only behavior
+          args.push('--permission-mode', 'plan');
+        }
+        // Note: We don't use --resume or --session-id here because:
+        // - --resume opens a picker or resumes by ID
+        // - --session-id requires a valid UUID
+        // For new chats, we just start fresh in the project directory
+        break;
+        
+      case 'cursor-agent':
+        // Cursor Agent CLI (if it exists)
+        if (sessionId) {
+          args.push('--resume', sessionId);
+        }
+        if (workspacePath) {
+          args.push('--workspace', workspacePath);
+        }
+        if (model) {
+          args.push('--model', model);
+        }
+        if (mode && mode !== 'agent') {
+          args.push('--mode', mode);
+        }
+        break;
+        
+      case 'gemini':
+        // Gemini CLI (if it exists)
+        if (model) {
+          args.push('--model', model);
+        }
+        // Gemini CLI parameters may vary - keeping it simple
+        break;
+    }
+    
+    // Build the full command
+    let command = `${tool} ${args.join(' ')}`.trim();
+    
+    // If there's an initial prompt, we can pipe it or use a here-doc approach
+    // For interactive mode, we'll send it as a follow-up
+    if (initialPrompt) {
+      // The CLI will start, then we need to send the prompt
+      // This is handled separately after window creation
+      console.log(`[TmuxManager] Initial prompt will be sent after CLI starts: ${initialPrompt.substring(0, 50)}...`);
+    }
+    
+    console.log(`[TmuxManager] Built CLI command: ${command}`);
+    
+    return command;
+  }
+
+  /**
+   * Send an initial prompt to a chat window after the CLI has started
+   * @param {string} sessionName - Session name
+   * @param {number} windowIndex - Window index
+   * @param {string} prompt - The prompt to send
+   * @param {number} delay - Delay in ms before sending (to let CLI initialize)
+   */
+  sendInitialPrompt(sessionName, windowIndex, prompt, delay = 1000) {
+    setTimeout(() => {
+      try {
+        // Escape the prompt for shell
+        const escapedPrompt = prompt.replace(/'/g, "'\\''");
+        execSync(
+          `tmux send-keys -t "${sessionName}:${windowIndex}" '${escapedPrompt}' Enter`,
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+        console.log(`[TmuxManager] Sent initial prompt to ${sessionName}:${windowIndex}`);
+      } catch (e) {
+        console.error(`[TmuxManager] Error sending initial prompt: ${e.message}`);
+      }
+    }, delay);
+  }
+
+  /**
+   * List all chat windows for a project
+   * Chat windows have names starting with "chat-"
+   * @param {string} projectPath - Project path
+   * @returns {Array<object>} - Array of chat window info
+   */
+  listChatWindows(projectPath) {
+    const sessionName = this.generateSessionName(projectPath);
+    console.log(`[TmuxManager] listChatWindows for project: ${projectPath}`);
+    console.log(`[TmuxManager] Looking for session: ${sessionName}`);
+    
+    const sessions = this.listAllSessions();
+    console.log(`[TmuxManager] All sessions:`, sessions.map(s => s.name));
+    
+    const windows = this.listWindows(sessionName);
+    console.log(`[TmuxManager] Windows in session ${sessionName}:`, windows.map(w => `${w.index}:${w.name}`));
+    
+    const chatWindows = windows.filter(w => w.name && w.name.startsWith('chat-'));
+    console.log(`[TmuxManager] Chat windows found:`, chatWindows.map(w => w.name));
+    
+    return chatWindows.map(w => {
+        // Parse window name: chat-{tool}-{topic}
+        const parts = w.name.split('-');
+        const tool = parts[1] || 'unknown';
+        const topic = parts.slice(2).join('-') || 'unknown';
+        
+        return {
+          id: this.buildTerminalId(sessionName, w.index),
+          sessionName,
+          windowIndex: w.index,
+          windowName: w.name,
+          tool,
+          topic,
+          currentPath: w.currentPath,
+          active: w.active,
+          type: 'chat'
+        };
+      });
+  }
+
+  /**
+   * Check if a window is a chat window
+   * @param {string} windowName - Window name
+   * @returns {boolean}
+   */
+  isChatWindow(windowName) {
+    return windowName && windowName.startsWith('chat-');
   }
 
   /**
@@ -432,19 +862,35 @@ export class TmuxManager {
       throw new Error('tmux is not installed');
     }
 
-    // Check if session exists
-    if (!this.sessionExists(sessionName)) {
-      throw new Error(`Session ${sessionName} not found`);
+    // Determine the base session (in case sessionName is already a client session)
+    const baseSessionName = this.getBaseSessionName(sessionName);
+
+    // Check if base session exists
+    if (!this.sessionExists(baseSessionName)) {
+      throw new Error(`Session ${baseSessionName} not found`);
     }
 
-    // Check if window exists
-    const windows = this.listWindows(sessionName);
+    // Check if window exists (windows are on the base session)
+    const windows = this.listWindows(baseSessionName);
     const window = windows.find(w => w.index === windowIndex);
     if (!window) {
-      throw new Error(`Window ${windowIndex} not found in session ${sessionName}`);
+      throw new Error(`Window ${windowIndex} not found in session ${baseSessionName}`);
     }
 
-    const windowKey = this.getWindowKey(sessionName, windowIndex);
+    // Determine which session to attach to
+    let attachSessionName = baseSessionName;
+    
+    // If clientId is provided, create/use a grouped client session
+    if (options.clientId) {
+      const clientResult = this.getOrCreateClientSession(baseSessionName, options.clientId);
+      attachSessionName = clientResult.name;
+      console.log(`[TmuxManager] Using client session ${attachSessionName} for independent view`);
+    }
+
+    // Use client-specific window key if clientId is provided
+    const windowKey = options.clientId 
+      ? this.getWindowKey(attachSessionName, windowIndex)
+      : this.getWindowKey(baseSessionName, windowIndex);
 
     // Check if already attached
     if (this.attachedWindows.has(windowKey)) {
@@ -455,9 +901,20 @@ export class TmuxManager {
     const cols = options.cols || 80;
     const rows = options.rows || 24;
 
-    // Spawn PTY with tmux attach to specific window
-    // Use select-window first, then attach
-    const ptyProcess = pty.spawn('tmux', ['attach', '-t', `${sessionName}:${windowIndex}`], {
+    // Disable mouse mode before attaching to prevent scroll events from being
+    // interpreted as mouse escape sequences (which appear as random text on mobile)
+    try {
+      execSync(
+        `tmux set-option -t "${baseSessionName}" mouse off`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      console.log(`[TmuxManager] Disabled mouse mode for session: ${baseSessionName}`);
+    } catch (mouseErr) {
+      console.warn(`[TmuxManager] Could not disable mouse mode: ${mouseErr.message}`);
+    }
+
+    // Spawn PTY with tmux attach to specific window in the appropriate session
+    const ptyProcess = pty.spawn('tmux', ['attach', '-t', `${attachSessionName}:${windowIndex}`], {
       name: 'xterm-256color',
       cols,
       rows,
@@ -505,13 +962,16 @@ export class TmuxManager {
       this.attachedWindows.delete(windowKey);
     });
 
-    console.log(`[TmuxManager] Attached to window: ${windowKey}`);
+    console.log(`[TmuxManager] Attached to window: ${windowKey}${options.clientId ? ` (client: ${options.clientId})` : ''}`);
 
-    const terminalId = this.buildTerminalId(sessionName, windowIndex);
+    // Use base session name for terminal ID (canonical reference)
+    const terminalId = this.buildTerminalId(baseSessionName, windowIndex);
 
     return {
       id: terminalId,
-      sessionName,
+      sessionName: baseSessionName,
+      clientSessionName: options.clientId ? attachSessionName : null,
+      clientId: options.clientId || null,
       windowIndex,
       windowName: window.name,
       pid: ptyProcess.pid,
@@ -654,6 +1114,14 @@ export class TmuxManager {
         throw new Error(`Failed to kill session: ${e.message}`);
       }
     }
+  }
+
+  /**
+   * Destroy a session (alias for killSession)
+   * @param {string} sessionName - Session name
+   */
+  destroySession(sessionName) {
+    this.killSession(sessionName);
   }
 
   /**

@@ -10,6 +10,49 @@ struct TerminalView: View {
     @State private var error: String?
     @State private var showKeyboardToolbar = true
     
+    /// Convenience initializer that creates Terminal and Project from IDs
+    /// Used for navigating to terminals from chat windows
+    init(terminalId: String, projectPath: String) {
+        // Create a minimal Terminal object for the chat window
+        self.terminal = Terminal(
+            id: terminalId,
+            name: terminalId.hasPrefix("chat-") ? "Chat" : "Terminal",
+            cwd: projectPath,
+            pid: nil,
+            active: true,
+            exitCode: nil,
+            source: "tmux",
+            lastCommand: nil,
+            activeCommand: nil,
+            shell: nil,
+            projectPath: projectPath,
+            createdAt: Date().timeIntervalSince1970 * 1000,
+            cols: 80,
+            rows: 24,
+            exitSignal: nil,
+            exitedAt: nil,
+            isHistory: false,
+            attached: nil,
+            windowCount: nil,
+            projectName: nil
+        )
+        
+        // Create a minimal Project object
+        let projectName = (projectPath as NSString).lastPathComponent
+        self.project = Project(
+            id: projectPath.data(using: .utf8)?.base64EncodedString() ?? projectPath,
+            name: projectName,
+            path: projectPath,
+            lastOpened: nil
+        )
+    }
+    
+    /// Standard initializer with Terminal and Project objects
+    init(terminal: Terminal, project: Project) {
+        self.terminal = terminal
+        self.project = project
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             // Terminal output area using SwiftTerm

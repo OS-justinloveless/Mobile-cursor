@@ -46,13 +46,14 @@ export default function ProjectDetailPage() {
       setProject(projectData.project);
       setTree(treeData.tree || []);
       
-      // Load conversations separately so it doesn't break the page if it fails
+      // Load chat windows separately so it doesn't break the page if it fails
       try {
         const conversationsRes = await apiRequest(`/api/projects/${projectId}/conversations`);
         const conversationsData = await conversationsRes.json();
-        setConversations(conversationsData.conversations || []);
+        // New API returns { chats: [...] } instead of { conversations: [...] }
+        setConversations(conversationsData.chats || conversationsData.conversations || []);
       } catch (convErr) {
-        console.error('Failed to load conversations:', convErr);
+        console.error('Failed to load chat windows:', convErr);
         setConversations([]);
       }
     } catch (err) {
@@ -77,19 +78,25 @@ export default function ProjectDetailPage() {
     
     try {
       setIsCreatingChat(true);
+      // Create a new tmux chat window with default settings
       const response = await apiRequest('/api/conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: projectId })
+        body: JSON.stringify({ 
+          projectPath: project?.path,
+          tool: 'cursor-agent',
+          mode: 'agent'
+        })
       });
       
       const data = await response.json();
       
-      if (data.chatId) {
-        // Navigate to the new chat
-        navigate(`/chat/${data.chatId}?type=chat&workspaceId=${projectId}`);
+      if (data.terminalId || data.chatId) {
+        // Navigate to the new chat window
+        const chatId = data.terminalId || data.chatId;
+        navigate(`/chat/${chatId}`);
       } else {
-        console.error('No chatId returned from create conversation');
+        console.error('No terminalId returned from create chat window');
       }
     } catch (err) {
       console.error('Failed to create chat:', err);
@@ -211,32 +218,32 @@ export default function ProjectDetailPage() {
           {conversations.length === 0 ? (
             <div className={styles.emptyChats}>
               <span className={styles.emptyIcon}>💬</span>
-              <p>No conversations for this project yet</p>
+              <p>No chat windows for this project yet</p>
               <p className={styles.emptyHint}>Start a new chat to begin</p>
             </div>
           ) : (
-            conversations.map((conversation) => (
+            conversations.map((chat) => (
               <div 
-                key={conversation.id}
+                key={chat.id || chat.terminalId}
                 className={styles.chatCard}
-                onClick={() => navigate(`/chat/${conversation.id}?type=${conversation.type}&workspaceId=${conversation.workspaceId || 'global'}`)}
+                onClick={() => navigate(`/chat/${chat.id || chat.terminalId}`)}
               >
                 <span className={styles.chatIcon}>
-                  {conversation.type === 'composer' ? '🎹' : '💬'}
+                  {getToolIcon(chat.tool)}
                 </span>
                 <div className={styles.chatInfo}>
                   <h4 className={styles.chatTitle}>
-                    {truncateTitle(conversation.title)}
+                    {truncateTitle(chat.topic || chat.title || chat.windowName)}
                   </h4>
                   <div className={styles.chatMeta}>
-                    <span className={`${styles.typeTag} ${styles[conversation.type + 'Tag']}`}>
-                      {conversation.type === 'composer' ? 'Composer' : 'Chat'}
+                    <span className={styles.typeTag}>
+                      {getToolName(chat.tool)}
                     </span>
                     <span className={styles.messageCount}>
-                      {conversation.messageCount || 0} messages
+                      {chat.active ? '🟢 Active' : '⚫ Inactive'}
                     </span>
                     <span className={styles.chatDate}>
-                      {formatDate(conversation.timestamp)}
+                      {chat.windowName}
                     </span>
                   </div>
                 </div>
@@ -254,6 +261,24 @@ function truncateTitle(title, maxLength = 80) {
   if (!title) return 'Untitled';
   if (title.length <= maxLength) return title;
   return title.slice(0, maxLength) + '...';
+}
+
+function getToolIcon(toolName) {
+  switch (toolName) {
+    case 'cursor-agent': return '🤖';
+    case 'claude': return '🧠';
+    case 'gemini': return '✨';
+    default: return '💻';
+  }
+}
+
+function getToolName(toolName) {
+  switch (toolName) {
+    case 'cursor-agent': return 'Cursor Agent';
+    case 'claude': return 'Claude Code';
+    case 'gemini': return 'Gemini';
+    default: return toolName || 'Terminal';
+  }
 }
 
 function formatDate(timestamp) {

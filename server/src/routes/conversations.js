@@ -1,92 +1,77 @@
 import { Router } from 'express';
-import { spawn, execSync } from 'child_process';
-import crypto from 'crypto';
-import { CursorChatReader } from '../utils/CursorChatReader.js';
+import { tmuxManager } from '../utils/TmuxManager.js';
 import { CursorWorkspace } from '../utils/CursorWorkspace.js';
-import { MobileChatStore } from '../utils/MobileChatStore.js';
-import { getCLIAdapter, getSupportedTools, checkAllToolsAvailability } from '../utils/CLIAdapter.js';
-import { cliSessionManager } from '../utils/CLISessionManager.js';
+import { getSupportedTools, checkAllToolsAvailability } from '../utils/CLIAdapter.js';
 import { logger } from '../utils/LogManager.js';
 
 const router = Router();
-const chatReader = new CursorChatReader();
 const workspaceManager = new CursorWorkspace();
-const mobileChatStore = MobileChatStore.getInstance();
 
 /**
- * Determine if a conversation is read-only from mobile's perspective.
+ * Conversations API - Tmux Chat Windows
  * 
- * Read-only conversations:
- * - Created in Cursor IDE (source: 'global', 'workspace', 'workspace-kv')
- * - Cannot have messages added from mobile (would be overwritten by Cursor)
+ * Chats are now tmux windows running AI CLI tools directly.
+ * This provides a simple, consistent experience:
+ * - Create a chat = create a tmux window running claude/cursor-agent/gemini
+ * - View a chat = attach to the tmux window via terminal view
+ * - Chat history is managed by the CLI tools themselves
  * 
- * Editable conversations:
- * - Created from mobile (source: 'mobile')
- * - Managed by cursor-agent, not Cursor IDE
+ * Window naming: chat-{tool}-{topic}
+ * Examples: chat-claude-auth-bug, chat-cursor-refactor, chat-gemini-review
  */
-function isConversationReadOnly(chat) {
-  // Mobile-created conversations are editable
-  if (chat.source === 'mobile') {
-    return false;
-  }
-  // Has mobile messages but was originally from Cursor - still read-only
-  // because Cursor will overwrite any changes
-  if (chat.hasMobileMessages && chat.source !== 'mobile') {
-    return true;
-  }
-  // All other sources (global, workspace, workspace-kv) are read-only
-  return true;
-}
 
-/**
- * Add read-only flag and metadata to conversations for mobile clients
- */
-function enrichConversationForMobile(chat) {
-  const isReadOnly = isConversationReadOnly(chat);
-  return {
-    ...chat,
-    isReadOnly,
-    // Provide a user-friendly reason
-    readOnlyReason: isReadOnly 
-      ? 'This conversation was created in Cursor IDE. You can view it but cannot add messages. Use "Fork" to create an editable copy.'
-      : null,
-    // Can this conversation be forked?
-    canFork: isReadOnly && chat.messageCount > 0
-  };
-}
-
-// Get list of all chats (both chat logs and composer logs)
+// Get list of all chat windows for a project
 router.get('/', async (req, res) => {
   try {
-    const { type, search } = req.query;
-
-    let chats;
-
-    if (search) {
-      chats = await chatReader.searchChats(search);
-    } else {
-      chats = await chatReader.getAllChats();
+    const { projectPath, projectId } = req.query;
+    
+    // Get project path from projectId if not provided directly
+    let resolvedProjectPath = projectPath;
+    if (!resolvedProjectPath && projectId && projectId !== 'global') {
+      const project = await workspaceManager.getProjectDetails(projectId);
+      if (project) {
+        resolvedProjectPath = project.path;
+      }
+    }
+    
+    if (!resolvedProjectPath) {
+      return res.json({
+        chats: [],
+        total: 0,
+        message: 'No project path specified'
+      });
     }
 
-    // Filter by type if specified
-    if (type && (type === 'chat' || type === 'composer')) {
-      chats = chats.filter(chat => chat.type === type);
-    }
-
-    // Filter out Cursor IDE chats - only show mobile-created chats
-    // This deprecates read-only Cursor IDE chats from the mobile UI
-    chats = chats.filter(chat => chat.source === 'mobile');
-
-    // Enrich with mobile-specific metadata
-    chats = chats.map(enrichConversationForMobile);
+    // List chat windows from tmux
+    const chatWindows = tmuxManager.listChatWindows(resolvedProjectPath);
+    
+    // Format for API response
+    const chats = chatWindows.map(w => ({
+      id: w.id,
+      terminalId: w.id,
+      windowName: w.windowName,
+      tool: w.tool,
+      topic: w.topic,
+      sessionName: w.sessionName,
+      windowIndex: w.windowIndex,
+      projectPath: resolvedProjectPath,
+      type: 'chat',
+      source: 'tmux',
+      active: w.active,
+      // For backwards compatibility with existing iOS code
+      title: `${w.tool}: ${w.topic}`,
+      timestamp: Date.now(), // We don't track creation time in tmux
+      messageCount: 0 // Not applicable for tmux chats
+    }));
 
     res.json({
-      conversations: chats,
+      chats,
+      conversations: chats, // Alias for backwards compatibility
       total: chats.length
     });
   } catch (error) {
-    console.error('Error fetching conversations:', error);
-    res.status(500).json({ error: 'Failed to fetch conversations' });
+    console.error('Error fetching chat windows:', error);
+    res.status(500).json({ error: 'Failed to fetch chat windows' });
   }
 });
 
@@ -101,387 +86,119 @@ router.get('/tools/availability', async (req, res) => {
   }
 });
 
-// Get CLI session manager stats
-router.get('/sessions/stats', async (req, res) => {
+// Get supported tools list
+router.get('/tools', async (req, res) => {
   try {
-    const stats = cliSessionManager.getStats();
-    const activeSessions = cliSessionManager.getActiveSessions();
-    res.json({
-      ...stats,
-      activeSessionIds: activeSessions
-    });
-  } catch (error) {
-    console.error('Error getting session stats:', error);
-    res.status(500).json({ error: 'Failed to get session stats' });
-  }
-});
-
-// Phase 4: Get resumable sessions (suspended sessions that can be resumed)
-router.get('/sessions/resumable', async (req, res) => {
-  try {
-    const resumable = await cliSessionManager.getResumableSessions();
-    res.json({
-      sessions: resumable,
-      count: resumable.length
-    });
-  } catch (error) {
-    console.error('Error getting resumable sessions:', error);
-    res.status(500).json({ error: 'Failed to get resumable sessions' });
-  }
-});
-
-// Phase 4: Get recent sessions (for quick access in app)
-router.get('/sessions/recent', async (req, res) => {
-  try {
-    const { hours = 24 } = req.query;
-    const recent = await cliSessionManager.getRecentSessions(parseInt(hours));
-    res.json({
-      sessions: recent,
-      count: recent.length,
-      hoursBack: parseInt(hours)
-    });
-  } catch (error) {
-    console.error('Error getting recent sessions:', error);
-    res.status(500).json({ error: 'Failed to get recent sessions' });
-  }
-});
-
-// Phase 4: Get session configuration
-router.get('/sessions/config', async (req, res) => {
-  try {
-    const config = await cliSessionManager.getConfig();
-    res.json({ config });
-  } catch (error) {
-    console.error('Error getting session config:', error);
-    res.status(500).json({ error: 'Failed to get session config' });
-  }
-});
-
-// Phase 4: Update session configuration
-router.put('/sessions/config', async (req, res) => {
-  try {
-    const { inactivityTimeoutMs, maxConcurrentSessions, autoResumeEnabled } = req.body;
-    
-    const updated = await cliSessionManager.updateConfig({
-      inactivityTimeoutMs,
-      maxConcurrentSessions,
-      autoResumeEnabled
-    });
+    const tools = getSupportedTools();
+    const availability = await checkAllToolsAvailability();
     
     res.json({
-      success: true,
-      config: updated
+      tools: tools.map(tool => ({
+        id: tool,
+        ...availability[tool]
+      }))
     });
   } catch (error) {
-    console.error('Error updating session config:', error);
-    res.status(400).json({ 
-      error: 'Failed to update session config',
-      details: error.message
-    });
+    console.error('Error getting tools:', error);
+    res.status(500).json({ error: 'Failed to get tools' });
   }
 });
 
-// Get session status for a specific conversation
-router.get('/:conversationId/session', async (req, res) => {
+// Get specific chat window info
+router.get('/:terminalId', async (req, res) => {
   try {
-    const { conversationId } = req.params;
+    const { terminalId } = req.params;
     
-    const session = cliSessionManager.getSession(conversationId);
-    
-    if (!session) {
-      // Session not active, but conversation may exist in store
-      const conversation = await mobileChatStore.getConversation(conversationId);
-      
-      if (!conversation) {
-        return res.status(404).json({ 
-          error: 'Conversation not found',
-          conversationId 
-        });
-      }
-      
-      // Phase 4: Include session state from store
-      const canResume = await cliSessionManager.canResume(conversationId);
-      
-      return res.json({
-        conversationId,
-        isActive: false,
-        tool: conversation.tool,
-        sessionState: conversation.sessionState || 'suspended',
-        suspendReason: conversation.suspendReason || null,
-        lastSessionAt: conversation.lastSessionAt || null,
-        canResume,
-        message: canResume 
-          ? 'Session is suspended. It will resume automatically when you send a message.'
-          : 'Session has ended. Start a new conversation to chat.'
+    // Check if this is a tmux terminal ID
+    if (!tmuxManager.isTmuxTerminal(terminalId)) {
+      return res.status(400).json({ 
+        error: 'Invalid terminal ID',
+        details: 'Terminal ID must be a tmux terminal (format: tmux-sessionName:windowIndex)'
       });
     }
     
-    res.json({
-      conversationId,
-      isActive: session.isActive,
-      sessionState: 'active',
-      tool: session.tool,
-      workspacePath: session.workspacePath,
-      model: session.model,
-      mode: session.mode,
-      uptime: session.uptime,
-      createdAt: session.createdAt
-    });
-  } catch (error) {
-    console.error('Error getting session status:', error);
-    res.status(500).json({ error: 'Failed to get session status' });
-  }
-});
-
-// Terminate a CLI session (keeps conversation, just stops PTY)
-router.delete('/:conversationId/session', async (req, res) => {
-  try {
-    const { conversationId } = req.params;
+    const { sessionName, windowIndex } = tmuxManager.parseTerminalId(terminalId);
+    const windows = tmuxManager.listWindows(sessionName);
+    const window = windows.find(w => w.index === windowIndex);
     
-    const terminated = await cliSessionManager.terminate(conversationId);
-    
-    res.json({
-      conversationId,
-      terminated,
-      message: terminated 
-        ? 'Session terminated. CLI session files are preserved for resume.'
-        : 'No active session to terminate.'
-    });
-  } catch (error) {
-    console.error('Error terminating session:', error);
-    res.status(500).json({ error: 'Failed to terminate session' });
-  }
-});
-
-// Get workspaces with chat counts
-router.get('/workspaces', async (req, res) => {
-  try {
-    const workspaces = await chatReader.getWorkspacesWithCounts();
-    res.json({ workspaces });
-  } catch (error) {
-    console.error('Error fetching workspaces:', error);
-    res.status(500).json({ error: 'Failed to fetch workspaces' });
-  }
-});
-
-// Get chats for a specific workspace
-router.get('/workspace/:workspaceId', async (req, res) => {
-  try {
-    const { workspaceId } = req.params;
-    const allChats = await chatReader.getAllChats();
-    
-    const workspaceChats = allChats.filter(chat => chat.workspaceId === workspaceId);
-    
-    res.json({ 
-      conversations: workspaceChats,
-      total: workspaceChats.length
-    });
-  } catch (error) {
-    console.error('Error fetching workspace conversations:', error);
-    res.status(500).json({ error: 'Failed to fetch workspace conversations' });
-  }
-});
-
-// Get specific conversation details
-router.get('/:conversationId', async (req, res) => {
-  try {
-    const { conversationId } = req.params;
-    
-    // Find the chat in all chats
-    const allChats = await chatReader.getAllChats();
-    const chat = allChats.find(c => c.id === conversationId);
-    
-    if (!chat) {
-      return res.status(404).json({ error: 'Conversation not found' });
+    if (!window) {
+      return res.status(404).json({ error: 'Chat window not found' });
     }
     
-    res.json({ conversation: enrichConversationForMobile(chat) });
-  } catch (error) {
-    console.error('Error fetching conversation:', error);
-    res.status(500).json({ error: 'Failed to fetch conversation details' });
-  }
-});
-
-// Fork a Cursor IDE conversation to create an editable mobile copy
-router.post('/:conversationId/fork', async (req, res) => {
-  try {
-    const { conversationId } = req.params;
-    const { workspaceId } = req.body;
-    
-    console.log(`Forking conversation ${conversationId}`);
-    
-    // Get the original conversation
-    const allChats = await chatReader.getAllChats();
-    const originalChat = allChats.find(c => c.id === conversationId);
-    
-    if (!originalChat) {
-      return res.status(404).json({ error: 'Conversation not found' });
-    }
-    
-    // Get messages from the original conversation
-    const messages = await chatReader.getChatMessages(
-      conversationId, 
-      originalChat.type, 
-      originalChat.workspaceId
-    );
-    
-    if (messages.length === 0) {
-      return res.status(400).json({ error: 'Cannot fork empty conversation' });
-    }
-    
-    // Generate new conversation ID
-    const newConversationId = crypto.randomUUID();
-    
-    // Get workspace details
-    let workspacePath = null;
-    let projectName = originalChat.projectName;
-    let workspaceFolder = originalChat.workspaceFolder;
-    
-    const targetWorkspaceId = workspaceId || originalChat.workspaceId;
-    if (targetWorkspaceId && targetWorkspaceId !== 'global') {
-      const project = await workspaceManager.getProjectDetails(targetWorkspaceId);
-      if (project) {
-        workspacePath = project.path;
-        projectName = project.name;
-        workspaceFolder = `file://${project.path}`;
-      }
-    }
-    
-    // Create the forked conversation in mobile store
-    await mobileChatStore.upsertConversation(newConversationId, {
-      title: `${originalChat.title} (Fork)`,
-      type: 'chat',
-      workspaceId: targetWorkspaceId || 'global',
-      workspaceFolder,
-      projectName,
-      forkedFrom: conversationId
-    });
-    
-    // Copy all messages to the new conversation
-    for (const msg of messages) {
-      await mobileChatStore.addMessage(newConversationId, {
-        id: `${msg.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        type: msg.type,
-        text: msg.text,
-        timestamp: msg.timestamp || Date.now(),
-        toolCalls: msg.toolCalls || null
+    // Check if it's a chat window
+    if (!tmuxManager.isChatWindow(window.name)) {
+      return res.status(400).json({ 
+        error: 'Not a chat window',
+        details: 'This terminal is not a chat window'
       });
     }
     
-    console.log(`Forked ${messages.length} messages to new conversation ${newConversationId}`);
-    
-    // Get the new conversation with enriched metadata
-    const newChat = await mobileChatStore.getConversation(newConversationId);
-    
-    // Build a properly formatted conversation object for iOS
-    // The mobile store uses createdAt/updatedAt but iOS expects timestamp
-    const formattedConversation = {
-      id: newConversationId,
-      type: newChat.type || 'chat',
-      title: newChat.title || `${originalChat.title} (Fork)`,
-      timestamp: newChat.updatedAt || newChat.createdAt || Date.now(),
-      messageCount: messages.length,
-      workspaceId: newChat.workspaceId || targetWorkspaceId || 'global',
-      source: 'mobile',
-      projectName: newChat.projectName || projectName,
-      workspaceFolder: newChat.workspaceFolder || workspaceFolder,
-      isProjectChat: !!(newChat.workspaceId && newChat.workspaceId !== 'global'),
-      // Mobile-created conversations are always editable
-      isReadOnly: false,
-      readOnlyReason: null,
-      canFork: false
-    };
+    // Parse window name: chat-{tool}-{topic}
+    const parts = window.name.split('-');
+    const tool = parts[1] || 'unknown';
+    const topic = parts.slice(2).join('-') || 'unknown';
     
     res.json({
-      success: true,
-      originalConversationId: conversationId,
-      newConversationId,
-      conversation: formattedConversation,
-      messagesCopied: messages.length
-    });
-  } catch (error) {
-    console.error('Error forking conversation:', error);
-    res.status(500).json({ 
-      error: 'Failed to fork conversation',
-      details: error.message 
-    });
-  }
-});
-
-// Get conversation messages with optional pagination
-router.get('/:conversationId/messages', async (req, res) => {
-  try {
-    const { conversationId } = req.params;
-    const { type = 'chat', workspaceId = 'global', limit, offset } = req.query;
-    
-    let messages = await chatReader.getChatMessages(conversationId, type, workspaceId);
-    const total = messages.length;
-    
-    // Apply pagination if requested
-    // If limit is specified, return the last N messages (from the end of the conversation)
-    if (limit) {
-      const limitNum = parseInt(limit, 10);
-      const offsetNum = offset ? parseInt(offset, 10) : 0;
-      
-      if (!isNaN(limitNum) && limitNum > 0) {
-        // Calculate the starting index from the end
-        // offset 0 with limit 20 means: last 20 messages
-        // offset 20 with limit 20 means: messages 20-40 from the end
-        const startFromEnd = offsetNum;
-        const endFromEnd = offsetNum + limitNum;
-        
-        // Convert to actual indices (from the start)
-        const startIndex = Math.max(0, total - endFromEnd);
-        const endIndex = Math.max(0, total - startFromEnd);
-        
-        messages = messages.slice(startIndex, endIndex);
+      chat: {
+        id: terminalId,
+        terminalId,
+        windowName: window.name,
+        tool,
+        topic,
+        sessionName,
+        windowIndex: window.index,
+        currentPath: window.currentPath,
+        active: window.active,
+        type: 'chat',
+        title: `${tool}: ${topic}`
       }
-    }
-    
-    res.json({ 
-      messages,
-      total,
-      hasMore: offset ? (parseInt(offset, 10) + messages.length < total) : false
     });
   } catch (error) {
-    console.error('Error fetching messages:', error);
-    res.status(500).json({ error: 'Failed to fetch messages' });
+    console.error('Error fetching chat window:', error);
+    res.status(500).json({ error: 'Failed to fetch chat window details' });
   }
 });
 
-// Search across all chats
-router.get('/search/:query', async (req, res) => {
-  try {
-    const { query } = req.params;
-    
-    if (!query || query.length < 2) {
-      return res.status(400).json({ error: 'Search query must be at least 2 characters' });
-    }
-    
-    const results = await chatReader.searchChats(query);
-    
-    res.json({ 
-      results,
-      total: results.length,
-      query
-    });
-  } catch (error) {
-    console.error('Error searching conversations:', error);
-    res.status(500).json({ error: 'Failed to search conversations' });
-  }
-});
-
-// Create a new conversation
+// Create a new chat window
 router.post('/', async (req, res) => {
   try {
-    const { workspaceId, model, mode, tool = 'cursor-agent' } = req.body;
+    const { 
+      projectPath, 
+      projectId,
+      tool = 'claude', 
+      topic, 
+      model, 
+      mode = 'agent',
+      initialPrompt 
+    } = req.body;
     
-    logger.info('Chat', 'Creating new conversation', {
-      workspaceId,
+    logger.info('Chat', 'Creating new chat window', {
+      projectPath,
+      projectId,
       tool,
+      topic,
       model,
       mode
     });
+
+    // Resolve project path
+    let resolvedProjectPath = projectPath;
+    let projectName = null;
+    
+    if (!resolvedProjectPath && projectId && projectId !== 'global') {
+      const project = await workspaceManager.getProjectDetails(projectId);
+      if (project) {
+        resolvedProjectPath = project.path;
+        projectName = project.name;
+      }
+    }
+    
+    if (!resolvedProjectPath) {
+      return res.status(400).json({
+        error: 'Project path required',
+        details: 'Either projectPath or a valid projectId must be provided'
+      });
+    }
 
     // Validate tool
     const validTools = getSupportedTools();
@@ -503,522 +220,137 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Get CLI adapter for the selected tool
-    const adapter = getCLIAdapter(tool);
-
-    // Check if CLI is installed
-    if (!await adapter.isAvailable()) {
-      return res.status(503).json({
-        error: `${adapter.getDisplayName()} CLI not found`,
-        details: adapter.getInstallInstructions(),
-        tool
-      });
-    }
-
-    // Get workspace details
-    let workspacePath = null;
-    let projectName = null;
-    let workspaceFolder = null;
-
-    if (workspaceId && workspaceId !== 'global') {
-      const project = await workspaceManager.getProjectDetails(workspaceId);
-      if (project) {
-        workspacePath = project.path;
-        projectName = project.name;
-        workspaceFolder = `file://${project.path}`;
-      }
-    }
-
-    // Build create chat command
-    const createArgs = adapter.buildCreateChatArgs({ workspacePath });
-    let chatId;
-
-    // Handle chat creation (CLI spawn or UUID generation)
-    if (createArgs.needsGeneratedId) {
-      // Tools like claude/gemini don't have explicit create command
-      chatId = crypto.randomUUID();
-      console.log(`Generated session ID for ${tool}: ${chatId}`);
-    } else {
-      // Tools like cursor-agent create chat via CLI
-      const result = await new Promise((resolve, reject) => {
-        const process = spawn(adapter.getExecutable(), createArgs);
-        let output = '';
-        let errorOutput = '';
-
-        process.stdout.on('data', (data) => {
-          output += data.toString();
-        });
-
-        process.stderr.on('data', (data) => {
-          errorOutput += data.toString();
-        });
-
-        process.on('close', (code) => {
-          if (code !== 0) {
-            reject(new Error(`${tool} failed: ${errorOutput}`));
-          } else {
-            resolve(output);
-          }
-        });
-
-        process.on('error', (err) => {
-          reject(err);
-        });
-      });
-
-      chatId = adapter.parseCreateChatOutput(result);
-      console.log(`Created chat via ${tool}: ${chatId}`);
-    }
-
-    // Save conversation to mobile store for persistence
-    await mobileChatStore.upsertConversation(chatId, {
-      type: 'chat',
-      workspaceId: workspaceId || 'global',
-      workspaceFolder,
-      projectName,
+    // Create the chat window
+    const chatWindow = tmuxManager.createChatWindow({
+      projectPath: resolvedProjectPath,
       tool,
-      model: model || null,
-      mode: mode || 'agent'
-    });
-
-    logger.info('Chat', 'Conversation created successfully', {
-      chatId,
-      tool,
-      model: model || null,
-      mode: mode || 'agent',
-      workspaceId: workspaceId || 'global'
+      topic,
+      model,
+      mode
     });
     
-    console.log(`Created conversation ${chatId} with tool=${tool}, model=${model || 'default'}, mode=${mode || 'agent'}`);
+    // If there's an initial prompt, send it after a short delay
+    if (initialPrompt && initialPrompt.trim()) {
+      tmuxManager.sendInitialPrompt(
+        chatWindow.sessionName,
+        chatWindow.windowIndex,
+        initialPrompt.trim(),
+        2000 // 2 second delay to let CLI initialize
+      );
+    }
+
+    logger.info('Chat', 'Chat window created', {
+      terminalId: chatWindow.id,
+      windowName: chatWindow.windowName,
+      tool,
+      topic: chatWindow.topic
+    });
+    
+    console.log(`Created chat window: ${chatWindow.windowName} (${chatWindow.id})`);
 
     res.json({
-      chatId,
       success: true,
+      terminalId: chatWindow.id,
+      windowName: chatWindow.windowName,
+      sessionName: chatWindow.sessionName,
+      windowIndex: chatWindow.windowIndex,
       tool,
-      model: model || null,
-      mode: mode || 'agent'
+      topic: chatWindow.topic,
+      model: chatWindow.model,
+      mode: chatWindow.mode,
+      projectPath: resolvedProjectPath,
+      projectName,
+      // For backwards compatibility
+      chatId: chatWindow.id
     });
   } catch (error) {
-    logger.error('Chat', 'Failed to create conversation', {
-      errorMessage: error.message,
-      workspaceId,
-      tool
+    logger.error('Chat', 'Failed to create chat window', {
+      errorMessage: error.message
     });
     
-    console.error('Error creating conversation:', error);
+    console.error('Error creating chat window:', error);
     res.status(500).json({
-      error: 'Failed to create conversation',
+      error: 'Failed to create chat window',
       details: error.message
     });
   }
 });
 
-// Send a message to a conversation
-router.post('/:conversationId/messages', async (req, res) => {
-  const startTime = Date.now();
-  const requestId = crypto.randomUUID().slice(0, 8);
-  
-  logger.info('Chat', `[${requestId}] New message request`, {
-    conversationId: req.params.conversationId,
-    hasMessage: !!req.body.message,
-    messageLength: req.body.message?.length || 0,
-    workspaceId: req.body.workspaceId,
-    attachments: req.body.attachments?.length || 0,
-    model: req.body.model,
-    mode: req.body.mode
-  });
-  
-  console.log('\n=== NEW MESSAGE REQUEST ===');
-  console.log('Timestamp:', new Date().toISOString());
-  console.log('Conversation ID:', req.params.conversationId);
-  console.log('Request body:', JSON.stringify({ ...req.body, attachments: req.body.attachments ? `${req.body.attachments.length} attachments` : 'none' }, null, 2));
-  
+// Close/delete a chat window
+router.delete('/:terminalId', async (req, res) => {
   try {
-    const { conversationId } = req.params;
-    const { message, workspaceId, allowReadOnly, attachments, model, mode } = req.body;
+    const { terminalId } = req.params;
     
-    // Validate mode if provided
-    const validModes = ['agent', 'plan', 'ask'];
-    if (mode && !validModes.includes(mode)) {
-      return res.status(400).json({
-        error: 'Invalid mode',
-        details: `Mode must be one of: ${validModes.join(', ')}`,
-        validModes
+    if (!tmuxManager.isTmuxTerminal(terminalId)) {
+      return res.status(400).json({ 
+        error: 'Invalid terminal ID'
       });
     }
     
-    if (!message || message.trim() === '') {
-      logger.warn('Chat', `[${requestId}] Empty message rejected`);
-      console.error('ERROR: Empty message');
-      return res.status(400).json({ error: 'Message cannot be empty' });
+    const { sessionName, windowIndex } = tmuxManager.parseTerminalId(terminalId);
+    
+    // Verify it's a chat window before killing
+    const windows = tmuxManager.listWindows(sessionName);
+    const window = windows.find(w => w.index === windowIndex);
+    
+    if (!window) {
+      return res.status(404).json({ error: 'Window not found' });
     }
     
-    // Check if this is a Cursor IDE conversation (read-only)
-    // unless allowReadOnly is explicitly set (for advanced use)
-    if (!allowReadOnly) {
-      const allChats = await chatReader.getAllChats();
-      const existingChat = allChats.find(c => c.id === conversationId);
-      
-      if (existingChat && isConversationReadOnly(existingChat)) {
-        console.log('Attempted to send message to read-only conversation');
-        return res.status(403).json({
-          error: 'This conversation is read-only',
-          code: 'CONVERSATION_READ_ONLY',
-          message: 'This conversation was created in Cursor IDE and cannot be modified from mobile. The conversation data would be overwritten by Cursor.',
-          suggestion: 'Fork this conversation to create an editable copy.',
-          forkUrl: `/api/conversations/${conversationId}/fork`,
-          conversationId
-        });
-      }
-    }
-    
-    // Get workspace details
-    let workspacePath = null;
-    let projectName = null;
-    let workspaceFolder = null;
-    
-    if (workspaceId && workspaceId !== 'global') {
-      console.log('Looking up workspace:', workspaceId);
-      const project = await workspaceManager.getProjectDetails(workspaceId);
-      if (project) {
-        workspacePath = project.path;
-        projectName = project.name;
-        workspaceFolder = `file://${project.path}`;
-        console.log('Workspace path:', workspacePath);
-      } else {
-        console.log('WARNING: Workspace not found:', workspaceId);
-      }
-    }
-    
-    // Get conversation from mobile store to check tool
-    const conversation = await mobileChatStore.getConversation(conversationId);
-    const tool = conversation?.tool || 'cursor-agent';
-    
-    logger.info('Chat', `[${requestId}] Retrieved conversation`, {
-      conversationId,
-      foundInStore: !!conversation,
-      tool,
-      storedModel: conversation?.model,
-      storedMode: conversation?.mode
-    });
-
-    // Get CLI adapter for the tool
-    const adapter = getCLIAdapter(tool);
-
-    // Check if CLI is installed
-    const cliAvailable = await adapter.isAvailable();
-    if (!cliAvailable) {
-      logger.error('Chat', `[${requestId}] CLI not available`, { tool, displayName: adapter.getDisplayName() });
-      return res.status(503).json({
-        error: `${adapter.getDisplayName()} CLI not found`,
-        details: adapter.getInstallInstructions(),
-        tool
+    if (!tmuxManager.isChatWindow(window.name)) {
+      return res.status(400).json({ 
+        error: 'Not a chat window',
+        details: 'Use /api/terminals endpoint for regular terminals'
       });
     }
     
-    logger.debug('Chat', `[${requestId}] CLI available`, { tool });
-
-    // Ensure conversation exists in mobile store (update model/mode if provided)
-    const conversationUpdate = {
-      type: 'chat',
-      workspaceId: workspaceId || 'global',
-      workspaceFolder,
-      projectName,
-      tool
-    };
-    // Only update model/mode if explicitly provided in this request
-    if (model) {
-      conversationUpdate.model = model;
-    }
-    if (mode) {
-      conversationUpdate.mode = mode;
-    }
-    await mobileChatStore.upsertConversation(conversationId, conversationUpdate);
+    // Kill the window
+    tmuxManager.killWindow(sessionName, windowIndex);
     
-    // Save the user message to mobile store immediately
-    const userMessageId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const userMessageTimestamp = Date.now();
-    
-    // Process attachments if present
-    let processedAttachments = null;
-    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
-      processedAttachments = attachments.map(att => ({
-        id: att.id || crypto.randomUUID(),
-        type: att.type || 'file',
-        filename: att.filename || 'attachment',
-        mimeType: att.mimeType || 'application/octet-stream',
-        size: att.size || 0,
-        data: att.data || null,
-        url: att.url || null,
-        thumbnailData: att.thumbnailData || null
-      }));
-      console.log(`Processing ${processedAttachments.length} attachment(s)`);
-    }
-    
-    await mobileChatStore.addMessage(conversationId, {
-      id: userMessageId,
-      type: 'user',
-      text: message.trim(),
-      timestamp: userMessageTimestamp,
-      attachments: processedAttachments
-    });
-    console.log('User message saved to mobile store:', userMessageId);
-    
-    // Note: We no longer write to Cursor's database directly because:
-    // 1. Cursor IDE overwrites external changes when it closes
-    // 2. Mobile-created conversations use cursor-agent which handles its own storage
-    // 3. Read-only conversations from Cursor IDE are blocked above
-    
-    // Set up SSE for streaming - disable all buffering
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
-    res.setHeader('Transfer-Encoding', 'chunked');
-    
-    // Disable socket buffering for immediate data transmission
-    res.socket.setNoDelay(true);
-    
-    // Flush headers immediately
-    res.flushHeaders();
-    console.log('SSE headers set and flushed');
-
-    // Build CLI command using adapter
-    const args = adapter.buildSendMessageArgs({
-      chatId: conversationId,
-      message: message.trim(),
-      workspacePath,
-      model,
-      mode
-    });
-
-    logger.info('Chat', `[${requestId}] Spawning CLI`, {
-      tool,
-      executable: adapter.getExecutable(),
-      argsCount: args.length,
-      workspacePath,
-      model,
-      mode
+    logger.info('Chat', 'Chat window closed', {
+      terminalId,
+      windowName: window.name
     });
     
-    console.log(`Spawning ${tool} with args:`, JSON.stringify(args));
-    console.log(`Full command: ${adapter.getExecutable()} ${args.join(' ')}`);
-
-    // Spawn CLI process
-    const agent = spawn(adapter.getExecutable(), args, {
-      stdio: ['ignore', 'pipe', 'pipe']
+    res.json({
+      success: true,
+      terminalId,
+      windowName: window.name,
+      message: 'Chat window closed'
     });
-    let hasData = false;
-    let errorOutput = '';
-    
-    // Accumulate assistant response for mobile store
-    let assistantText = '';
-    let assistantToolCalls = [];
-    
-    console.log('Process spawned with PID:', agent.pid);
-    
-    // Send initial connection message with immediate flush
-    res.write('data: {"type":"connected"}\n\n');
-    // Force flush the data immediately
-    if (res.flush) res.flush();
-    console.log('Sent connected event (flushed)');
-    
-    // Keep-alive interval to prevent connection timeout
-    const keepAliveInterval = setInterval(() => {
-      if (!res.writableEnded) {
-        // Send SSE comment (ignored by parsers but keeps connection alive)
-        res.write(': keepalive\n\n');
-        if (res.flush) res.flush();
-      }
-    }, 15000); // Every 15 seconds
-    
-    // Stream stdout data to client
-    agent.stdout.on('data', (data) => {
-      hasData = true;
-      const dataStr = data.toString();
-      console.log('stdout chunk:', dataStr.substring(0, 200));
-      const lines = dataStr.split('\n').filter(line => line.trim());
-      
-      for (const line of lines) {
-        try {
-          // Try to parse as JSON to validate
-          const parsed = JSON.parse(line);
-          
-          // Extract text and tool calls for mobile store
-          if (parsed.type === 'assistant' && parsed.message?.content) {
-            for (const item of parsed.message.content) {
-              if (item.type === 'text' && item.text) {
-                assistantText += item.text;
-              } else if (item.type === 'tool_use') {
-                assistantToolCalls.push({
-                  id: item.id,
-                  name: item.name,
-                  input: item.input,
-                  status: 'running'
-                });
-              } else if (item.type === 'tool_result') {
-                const toolIndex = assistantToolCalls.findIndex(t => t.id === item.tool_use_id);
-                if (toolIndex >= 0) {
-                  assistantToolCalls[toolIndex].status = item.is_error ? 'error' : 'complete';
-                  assistantToolCalls[toolIndex].result = item.content;
-                }
-              }
-            }
-          }
-          
-          res.write(`data: ${line}\n\n`);
-          if (res.flush) res.flush();
-        } catch (e) {
-          // If not JSON, send as text message
-          console.log('Non-JSON output:', line);
-          assistantText += line + '\n';
-          res.write(`data: ${JSON.stringify({ type: 'text', content: line })}\n\n`);
-          if (res.flush) res.flush();
-        }
-      }
-    });
-    
-    // Log errors but continue
-    agent.stderr.on('data', (data) => {
-      const errorText = data.toString();
-      errorOutput += errorText;
-      console.error(`${tool} stderr:`, errorText);
-      // Send error as event
-      res.write(`data: ${JSON.stringify({ type: 'stderr', content: errorText })}\n\n`);
-    });
-    
-    // Handle completion
-    agent.on('close', async (code) => {
-      clearInterval(keepAliveInterval);
-      const duration = Date.now() - startTime;
-      
-      logger.info('Chat', `[${requestId}] CLI process closed`, {
-        tool,
-        exitCode: code,
-        duration,
-        hadData: hasData,
-        assistantTextLength: assistantText.length,
-        toolCallCount: assistantToolCalls.length
-      });
-      
-      console.log(`${tool} closed`);
-      console.log('Exit code:', code);
-      console.log('Duration:', duration + 'ms');
-      console.log('Had data:', hasData);
-      
-      if (code === 0) {
-        console.log('SUCCESS: Message sent');
-        
-        // Save assistant response to mobile store
-        if (assistantText || assistantToolCalls.length > 0) {
-          const assistantMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          const assistantTimestamp = Date.now();
-          
-          try {
-            // Mark any running tools as complete
-            const finalToolCalls = assistantToolCalls.map(tc => ({
-              ...tc,
-              status: tc.status === 'running' ? 'complete' : tc.status
-            }));
-            
-            // Save to mobile store
-            await mobileChatStore.addMessage(conversationId, {
-              id: assistantMessageId,
-              type: 'assistant',
-              text: assistantText,
-              timestamp: assistantTimestamp,
-              toolCalls: finalToolCalls.length > 0 ? finalToolCalls : null
-            });
-            console.log('Assistant message saved to mobile store:', assistantMessageId);
-          } catch (saveError) {
-            console.error('Error saving assistant message to mobile store:', saveError);
-          }
-        }
-        
-        res.write(`data: ${JSON.stringify({ type: 'complete', success: true })}\n\n`);
-      } else {
-        console.error('FAILED: Non-zero exit code');
-        console.error('Full stderr output:', errorOutput);
-        res.write(`data: ${JSON.stringify({ 
-          type: 'complete', 
-          success: false, 
-          code,
-          stderr: errorOutput 
-        })}\n\n`);
-      }
-      
-      if (res.flush) res.flush();
-      res.end();
-      console.log('=== REQUEST COMPLETE ===\n');
-    });
-    
-    // Handle errors
-    agent.on('error', (err) => {
-      clearInterval(keepAliveInterval);
-      
-      logger.error('Chat', `[${requestId}] CLI spawn error`, {
-        tool,
-        errorCode: err.code,
-        errorMessage: err.message
-      });
-      
-      console.error(`${tool} spawn error:`, err);
-      console.error('Error code:', err.code);
-      console.error('Error message:', err.message);
-
-      const errorMsg = err.code === 'ENOENT'
-        ? `${adapter.getDisplayName()} command not found. ${adapter.getInstallInstructions()}`
-        : err.message;
-
-      res.write(`data: ${JSON.stringify({
-        type: 'error',
-        content: errorMsg,
-        code: err.code
-      })}\n\n`);
-      if (res.flush) res.flush();
-      res.end();
-      console.log('=== REQUEST FAILED (spawn error) ===\n');
-    });
-    
-    // Clean up on client disconnect
-    // IMPORTANT: Use res.on('close') not req.on('close')!
-    // req.on('close') fires when the incoming POST body is fully received,
-    // but res.on('close') fires when the SSE connection to the client actually closes
-    res.on('close', () => {
-      clearInterval(keepAliveInterval);
-      // Only log and kill if the process is still running and response hasn't ended normally
-      if (!agent.killed && !res.writableEnded) {
-        console.log('Client disconnected, killing process');
-        agent.kill();
-      }
-    });
-    
   } catch (error) {
-    logger.error('Chat', `[${requestId}] Message handler exception`, {
-      errorMessage: error.message,
-      stack: error.stack
-    });
+    console.error('Error closing chat window:', error);
+    res.status(500).json({ error: 'Failed to close chat window' });
+  }
+});
+
+// Send initial prompt to an existing chat window
+router.post('/:terminalId/prompt', async (req, res) => {
+  try {
+    const { terminalId } = req.params;
+    const { prompt, delay = 500 } = req.body;
     
-    console.error('ERROR in message handler:', error);
-    console.error('Stack trace:', error.stack);
-    
-    // If headers not sent, send error response
-    if (!res.headersSent) {
-      res.status(500).json({ 
-        error: 'Failed to send message',
-        details: error.message,
-        stack: error.stack
-      });
-    } else {
-      // If streaming started, send error event
-      res.write(`data: ${JSON.stringify({ 
-        type: 'error', 
-        content: error.message,
-        stack: error.stack 
-      })}\n\n`);
-      res.end();
+    if (!prompt || !prompt.trim()) {
+      return res.status(400).json({ error: 'Prompt is required' });
     }
-    console.log('=== REQUEST FAILED (exception) ===\n');
+    
+    if (!tmuxManager.isTmuxTerminal(terminalId)) {
+      return res.status(400).json({ error: 'Invalid terminal ID' });
+    }
+    
+    const { sessionName, windowIndex } = tmuxManager.parseTerminalId(terminalId);
+    
+    // Send the prompt
+    tmuxManager.sendInitialPrompt(sessionName, windowIndex, prompt.trim(), delay);
+    
+    res.json({
+      success: true,
+      terminalId,
+      message: 'Prompt will be sent to the chat window'
+    });
+  } catch (error) {
+    console.error('Error sending prompt:', error);
+    res.status(500).json({ error: 'Failed to send prompt' });
   }
 });
 

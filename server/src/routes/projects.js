@@ -3,39 +3,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { CursorWorkspace } from '../utils/CursorWorkspace.js';
-import { CursorChatReader } from '../utils/CursorChatReader.js';
-
-/**
- * Determine if a conversation is read-only from mobile's perspective.
- */
-function isConversationReadOnly(chat) {
-  if (chat.source === 'mobile') {
-    return false;
-  }
-  if (chat.hasMobileMessages && chat.source !== 'mobile') {
-    return true;
-  }
-  return true;
-}
-
-/**
- * Add read-only flag and metadata to conversations for mobile clients
- */
-function enrichConversationForMobile(chat) {
-  const isReadOnly = isConversationReadOnly(chat);
-  return {
-    ...chat,
-    isReadOnly,
-    readOnlyReason: isReadOnly 
-      ? 'This conversation was created in Cursor IDE. You can view it but cannot add messages.'
-      : null,
-    canFork: isReadOnly && chat.messageCount > 0
-  };
-}
+import { tmuxManager } from '../utils/TmuxManager.js';
 
 const router = Router();
 const cursorWorkspace = new CursorWorkspace();
-const chatReader = new CursorChatReader();
 
 // Get list of recent Cursor projects
 router.get('/', async (req, res) => {
@@ -217,7 +188,8 @@ router.post('/:projectId/open', async (req, res) => {
   }
 });
 
-// Get conversations/chats for a specific project
+// Get chat windows for a specific project
+// Chats are now tmux windows with names starting with "chat-"
 router.get('/:projectId/conversations', async (req, res) => {
   try {
     const { projectId } = req.params;
@@ -227,37 +199,40 @@ router.get('/:projectId/conversations', async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
     
-    const conversations = await chatReader.getChatsByProjectPath(project.path);
+    // Get chat windows from tmux
+    const chatWindows = tmuxManager.listChatWindows(project.path);
     
-    // Estimate tokens for each conversation and enrich with mobile metadata
-    let totalProjectTokens = 0;
-    const conversationsWithTokens = await Promise.all(
-      conversations.map(async (conv) => {
-        const estimatedTokens = await chatReader.estimateConversationTokens(
-          conv.id,
-          conv.type,
-          conv.workspaceId
-        );
-        totalProjectTokens += estimatedTokens;
-        // Add mobile-specific fields (isReadOnly, readOnlyReason, canFork)
-        const enriched = enrichConversationForMobile(conv);
-        return {
-          ...enriched,
-          estimatedTokens
-        };
-      })
-    );
+    // Format for API response
+    const chats = chatWindows.map(w => ({
+      id: w.id,
+      terminalId: w.id,
+      windowName: w.windowName,
+      tool: w.tool,
+      topic: w.topic,
+      sessionName: w.sessionName,
+      windowIndex: w.windowIndex,
+      projectPath: project.path,
+      type: 'chat',
+      source: 'tmux',
+      active: w.active,
+      // For backwards compatibility
+      title: `${w.tool}: ${w.topic}`,
+      timestamp: Date.now(),
+      messageCount: 0, // Not applicable for tmux chats
+      isReadOnly: false,
+      canFork: false
+    }));
     
     res.json({ 
-      conversations: conversationsWithTokens,
-      total: conversationsWithTokens.length,
-      totalTokens: totalProjectTokens,
+      conversations: chats,
+      chats, // Alias for new clients
+      total: chats.length,
       projectName: project.name,
       projectPath: project.path
     });
   } catch (error) {
-    console.error('Error fetching project conversations:', error);
-    res.status(500).json({ error: 'Failed to fetch project conversations' });
+    console.error('Error fetching project chat windows:', error);
+    res.status(500).json({ error: 'Failed to fetch project chat windows' });
   }
 });
 

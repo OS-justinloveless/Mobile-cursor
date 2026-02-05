@@ -799,3 +799,109 @@
 .markdownEm {
   font-style: italic;
 }
+
+/* Close Button */
+.closeButton {
+  padding: 8px 12px;
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: var(--radius-md);
+  color: #fca5a5;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  flex-shrink: 0;
+}
+
+.closeButton:hover {
+  background: rgba(220, 38, 38, 0.25);
+  border-color: rgba(220, 38, 38, 0.5);
+}
+
+/* Terminal Info Panel */
+.terminalInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+
+.infoCard {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 20px;
+}
+
+.infoCard h3 {
+  font-size: 18px;
+  color: var(--text-bright);
+  margin: 0 0 12px 0;
+}
+
+.infoCard p {
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+  line-height: 1.6;
+}
+
+.infoDetails {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.infoRow {
+  display: flex;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.infoRow:last-child {
+  border-bottom: none;
+}
+
+.infoLabel {
+  width: 100px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.infoValue {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  word-break: break-all;
+}
+
+/* Status Message */
+.statusMessage {
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+}
+
+.statusMessage.success {
+  background: rgba(74, 222, 128, 0.15);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  color: #4ade80;
+}
+
+.statusMessage.error {
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  color: #fca5a5;
+}
+
+/* Input Hint */
+.inputHint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  padding-left: 4px;
+}
