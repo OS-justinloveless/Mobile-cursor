@@ -46,6 +46,9 @@ struct GitRepoSection: View {
     // Callback for showing toasts (lifted to parent)
     var onShowToast: ((ToastData) -> Void)?
     
+    // Refresh trigger - when changed by the parent, forces a status reload
+    var refreshTrigger: UUID = UUID()
+    
     @State private var status: GitStatus?
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -122,6 +125,11 @@ struct GitRepoSection: View {
                     // Branch row
                     branchRow(status)
                     
+                    // Commit button (above staged changes)
+                    if !status.staged.isEmpty && selectedUnstagedPaths.isEmpty {
+                        commitButton(stagedCount: status.staged.count)
+                    }
+                    
                     // Staged changes
                     if !stagedChanges.isEmpty {
                         stagedSection
@@ -141,11 +149,6 @@ struct GitRepoSection: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 4)
-                    }
-                    
-                    // Commit button
-                    if !status.staged.isEmpty && selectedUnstagedPaths.isEmpty {
-                        commitButton(stagedCount: status.staged.count)
                     }
                     
                     // Batch undo button
@@ -169,6 +172,11 @@ struct GitRepoSection: View {
                     await loadStatus()
                     await loadRemotes()
                 }
+            }
+        }
+        .onChange(of: refreshTrigger) { _, _ in
+            Task {
+                await loadStatus()
             }
         }
         .alert("Git Error", isPresented: .init(

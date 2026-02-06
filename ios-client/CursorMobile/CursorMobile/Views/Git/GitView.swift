@@ -183,6 +183,9 @@ struct GitView: View {
     // Toast state - centralized for single toast display
     @State private var toastData: ToastData?
     
+    // Refresh trigger - changed after commit to tell GitRepoSection to reload
+    @State private var repoRefreshTrigger = UUID()
+    
     /// Whether to show search/filter/sort controls (only for multiple repos)
     private var showControls: Bool {
         repositories.count > 1
@@ -368,6 +371,8 @@ struct GitView: View {
                     } else if let rootRepo = repositories.first(where: { $0.isRoot }) {
                         await refreshRepositoryStatus(rootRepo)
                     }
+                    // Signal GitRepoSection to reload its local status
+                    repoRefreshTrigger = UUID()
                 }
             }
         case .branch(let currentBranch, let repoPath):
@@ -502,7 +507,8 @@ struct GitView: View {
                     },
                     onShowToast: { toast in
                         toastData = toast
-                    }
+                    },
+                    refreshTrigger: repoRefreshTrigger
                 )
             }
         }
