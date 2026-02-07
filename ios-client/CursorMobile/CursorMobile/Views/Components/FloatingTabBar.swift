@@ -7,7 +7,8 @@ struct FloatingTabBar: View {
     private let tabs: [(icon: String, label: String)] = [
         ("folder.fill", "Files"),
         ("arrow.triangle.branch", "Git"),
-        ("terminal.fill", "Terminals")
+        ("terminal.fill", "Terminals"),
+        ("bubble.left.and.bubble.right.fill", "Chat")
     ]
     
     var body: some View {

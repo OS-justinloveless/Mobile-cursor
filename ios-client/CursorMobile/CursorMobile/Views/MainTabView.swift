@@ -10,6 +10,12 @@ struct MainTabView: View {
     
     // Track when terminal view is active (to hide tab bar)
     @State private var isTerminalViewActive = false
+
+    // Track when chat session is active (to hide tab bar)
+    @State private var isChatSessionActive = false
+
+    // ChatManager for managing chat state
+    @StateObject private var chatManager = ChatManager()
     
     // Track if we've attempted to restore the last project
     @State private var hasAttemptedProjectRestore = false
@@ -85,7 +91,13 @@ struct MainTabView: View {
                     serverUrl: authManager.serverUrl ?? "",
                     token: authManager.token ?? ""
                 )
-                
+
+                // Configure chat manager
+                chatManager.configure(
+                    apiService: authManager.createAPIService(),
+                    webSocketManager: webSocketManager
+                )
+
                 // Restore last project if we haven't already
                 if !hasAttemptedProjectRestore && selectedProject == nil {
                     restoreLastProject()
@@ -112,6 +124,10 @@ struct MainTabView: View {
             if newTab != 2 {
                 isTerminalViewActive = false
             }
+            // Reset chat session active state when switching away from chat tab
+            if newTab != 3 {
+                isChatSessionActive = false
+            }
         }
     }
     
@@ -137,13 +153,15 @@ struct MainTabView: View {
                     gitTab(project: project)
                 case 2:
                     terminalsTab(project: project)
+                case 3:
+                    chatTab(project: project)
                 default:
                     filesTab(project: project)
                 }
             }
             
-            // Floating tab bar - hide when in terminal view
-            if !isTerminalViewActive {
+            // Floating tab bar - hide when in terminal or chat session view
+            if !isTerminalViewActive && !isChatSessionActive {
                 FloatingTabBar(selectedTab: $selectedTab)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
@@ -206,6 +224,24 @@ struct MainTabView: View {
                 .safeAreaInset(edge: .bottom) {
                     // Only add bottom spacing when tab bar is visible
                     if !isTerminalViewActive {
+                        Color.clear.frame(height: 80)
+                    }
+                }
+        }
+    }
+
+    private func chatTab(project: Project) -> some View {
+        NavigationStack {
+            ChatTabView(project: project, isChatSessionActive: $isChatSessionActive)
+                .environmentObject(chatManager)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        drawerToggleButton
+                    }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    // Only add bottom spacing when tab bar is visible
+                    if !isChatSessionActive {
                         Color.clear.frame(height: 80)
                     }
                 }

@@ -76,6 +76,18 @@
 		F000000000000093 /* BinaryFileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000093 /* BinaryFileView.swift */; };
 		F000000000000094 /* PDFViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000094 /* PDFViewerView.swift */; };
 		G000000000000001 /* ContentBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = G100000000000001 /* ContentBlock.swift */; };
+		H000000000000001 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000001 /* Agent.swift */; };
+		H000000000000002 /* ChatManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000002 /* ChatManager.swift */; };
+		H000000000000003 /* ChatTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000003 /* ChatTabView.swift */; };
+		H000000000000004 /* ChatListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000004 /* ChatListView.swift */; };
+		H000000000000005 /* ChatSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000005 /* ChatSessionView.swift */; };
+		H000000000000006 /* ChatInputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000006 /* ChatInputBar.swift */; };
+		H000000000000007 /* ChatMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000007 /* ChatMessageView.swift */; };
+		H000000000000008 /* ToolCallBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000008 /* ToolCallBlockView.swift */; };
+		H000000000000009 /* ChatMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000009 /* ChatMarkdownView.swift */; };
+		H00000000000000A /* ChatModePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000A /* ChatModePickerView.swift */; };
+		H00000000000000B /* NewChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000B /* NewChatSheet.swift */; };
+		H00000000000000C /* ConversationManagementSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000C /* ConversationManagementSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -148,6 +160,18 @@
 		F100000000000093 /* BinaryFileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinaryFileView.swift; sourceTree = "<group>"; };
 		F100000000000094 /* PDFViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFViewerView.swift; sourceTree = "<group>"; };
 		G100000000000001 /* ContentBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentBlock.swift; sourceTree = "<group>"; };
+		H100000000000001 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
+		H100000000000002 /* ChatManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatManager.swift; sourceTree = "<group>"; };
+		H100000000000003 /* ChatTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTabView.swift; sourceTree = "<group>"; };
+		H100000000000004 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
+		H100000000000005 /* ChatSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionView.swift; sourceTree = "<group>"; };
+		H100000000000006 /* ChatInputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInputBar.swift; sourceTree = "<group>"; };
+		H100000000000007 /* ChatMessageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageView.swift; sourceTree = "<group>"; };
+		H100000000000008 /* ToolCallBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCallBlockView.swift; sourceTree = "<group>"; };
+		H100000000000009 /* ChatMarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMarkdownView.swift; sourceTree = "<group>"; };
+		H10000000000000A /* ChatModePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModePickerView.swift; sourceTree = "<group>"; };
+		H10000000000000B /* NewChatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewChatSheet.swift; sourceTree = "<group>"; };
+		H10000000000000C /* ConversationManagementSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationManagementSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -235,6 +259,7 @@
 				F10000000000002B /* GitFilterSettings.swift */,
 				F100000000000050 /* Suggestion.swift */,
 				G100000000000001 /* ContentBlock.swift */,
+				H100000000000001 /* Agent.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -250,6 +275,7 @@
 				F100000000000043 /* SavedHostsManager.swift */,
 				C100000000000001 /* SyntaxHighlightManager.swift */,
 				F100000000000070 /* LogManager.swift */,
+				H100000000000002 /* ChatManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -264,9 +290,27 @@
 				F300000000000010 /* Settings */,
 				96E84BD72F272EE700B612F2 /* Terminals */,
 				F300000000000012 /* Git */,
+				H300000000000001 /* Chat */,
 				F300000000000011 /* Components */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		H300000000000001 /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				H100000000000003 /* ChatTabView.swift */,
+				H100000000000004 /* ChatListView.swift */,
+				H100000000000005 /* ChatSessionView.swift */,
+				H100000000000006 /* ChatInputBar.swift */,
+				H100000000000007 /* ChatMessageView.swift */,
+				H100000000000008 /* ToolCallBlockView.swift */,
+				H100000000000009 /* ChatMarkdownView.swift */,
+				H10000000000000A /* ChatModePickerView.swift */,
+				H10000000000000B /* NewChatSheet.swift */,
+				H10000000000000C /* ConversationManagementSheet.swift */,
+			);
+			path = Chat;
 			sourceTree = "<group>";
 		};
 		F300000000000006 /* Auth */ = {
@@ -489,6 +533,18 @@
 				D000000000000002 /* ToastView.swift in Sources */,
 				F000000000000050 /* Suggestion.swift in Sources */,
 				F000000000000051 /* SuggestionOverlay.swift in Sources */,
+				H000000000000001 /* Agent.swift in Sources */,
+				H000000000000002 /* ChatManager.swift in Sources */,
+				H000000000000003 /* ChatTabView.swift in Sources */,
+				H000000000000004 /* ChatListView.swift in Sources */,
+				H000000000000005 /* ChatSessionView.swift in Sources */,
+				H000000000000006 /* ChatInputBar.swift in Sources */,
+				H000000000000007 /* ChatMessageView.swift in Sources */,
+				H000000000000008 /* ToolCallBlockView.swift in Sources */,
+				H000000000000009 /* ChatMarkdownView.swift in Sources */,
+				H00000000000000A /* ChatModePickerView.swift in Sources */,
+				H00000000000000B /* NewChatSheet.swift in Sources */,
+				H00000000000000C /* ConversationManagementSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

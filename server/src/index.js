@@ -13,6 +13,7 @@ import { setupRoutes } from './routes/index.js';
 import { setupWebSocket } from './websocket/index.js';
 import { AuthManager } from './auth/AuthManager.js';
 import { LogManager } from './utils/LogManager.js';
+import { chatProcessManager } from './utils/ChatProcessManager.js';
 
 config();
 
@@ -250,6 +251,7 @@ process.on('SIGINT', () => {
   logger.info('Server', 'Shutting down server...');
   console.log('\nShutting down server...');
   authManager.shutdown();  // Save auth state before exit
+  chatProcessManager.cleanup();  // Clean up chat processes
   server.close(() => {
     logger.info('Server', 'Server closed');
     console.log('Server closed');

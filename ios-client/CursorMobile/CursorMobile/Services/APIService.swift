@@ -955,9 +955,9 @@ class APIService {
     /// - Parameter terminalId: The terminal ID of the chat window to close
     func deleteChatWindow(terminalId: String) async throws {
         logAsync(.info, "API", "Deleting chat window", data: ["terminalId": terminalId])
-        
+
         let encodedId = terminalId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? terminalId
-        
+
         do {
             _ = try await makeRequest(endpoint: "/api/conversations/\(encodedId)", method: "DELETE")
             logAsync(.info, "API", "Chat window deleted", data: ["terminalId": terminalId])
@@ -966,7 +966,36 @@ class APIService {
             throw error
         }
     }
-    
+
+    /// Fork/clone a chat window
+    /// Creates a new chat window with the same tool and settings as the source
+    /// - Parameters:
+    ///   - terminalId: The terminal ID of the chat window to fork
+    ///   - newTopic: Optional new topic name (defaults to original-fork-timestamp)
+    /// - Returns: Response with the new chat window info
+    func forkChatWindow(terminalId: String, newTopic: String? = nil) async throws -> ChatWindowResponse {
+        logAsync(.info, "API", "Forking chat window", data: ["terminalId": terminalId])
+
+        let encodedId = terminalId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? terminalId
+
+        var bodyDict: [String: Any] = [:]
+        if let newTopic = newTopic {
+            bodyDict["newTopic"] = newTopic
+        }
+
+        let body = try JSONSerialization.data(withJSONObject: bodyDict)
+
+        do {
+            let data = try await makeRequest(endpoint: "/api/conversations/\(encodedId)/fork", method: "POST", body: body)
+            let response = try decoder.decode(ChatWindowResponse.self, from: data)
+            logAsync(.info, "API", "Chat window forked", data: ["newTerminalId": response.terminalId])
+            return response
+        } catch {
+            logAsync(.error, "API", "Failed to fork chat window", data: ["error": error.localizedDescription])
+            throw error
+        }
+    }
+
     /// Legacy method - redirects to createChatWindow
     @available(*, deprecated, message: "Use createChatWindow instead")
     func createConversation(workspaceId: String? = nil, model: String? = nil, mode: ChatMode? = nil, tool: String = "cursor-agent") async throws -> String {
@@ -976,7 +1005,7 @@ class APIService {
             model: model,
             mode: mode ?? .agent
         )
-        return response.terminalId
+        return response.conversationId
     }
     
     /// Get tool availability status from the server

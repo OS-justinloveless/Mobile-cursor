@@ -4,6 +4,7 @@ import os from 'os';
 import fs from 'fs';
 import { ptyManager, tmuxManager } from '../routes/terminals.js';
 import { LogManager } from '../utils/LogManager.js';
+import { chatProcessManager } from '../utils/ChatProcessManager.js';
 
 const logger = LogManager.getInstance();
 const tmuxSubscribers = new Map(); // "sessionName:windowIndex" -> Set of clientIds
@@ -94,7 +95,28 @@ export function setupWebSocket(wss, authManager) {
           case 'ping':
             ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
             break;
-            
+
+          // Chat session handlers (chat windows are tmux windows running AI CLIs)
+          case 'chatAttach':
+            handleChatAttach(clientId, ws, message);
+            break;
+
+          case 'chatDetach':
+            handleChatDetach(clientId, message);
+            break;
+
+          case 'chatMessage':
+            handleChatMessage(clientId, ws, message);
+            break;
+
+          case 'chatCancel':
+            handleChatCancel(clientId, ws, message);
+            break;
+
+          case 'chatApproval':
+            handleChatApproval(clientId, ws, message);
+            break;
+
           default:
             ws.send(JSON.stringify({
               type: 'error',
@@ -897,10 +919,264 @@ function handleTerminalKill(clientId, ws, message) {
     }
     return;
   }
-  
+
   ws.send(JSON.stringify({
     type: 'terminalError',
     terminalId,
     message: 'Invalid terminal ID format'
   }));
+}
+
+// ============ Chat Session Handlers ============
+// Chat processes use ChatProcessManager with JSON output for structured data
+// This provides clean content blocks instead of raw terminal ANSI codes
+
+const chatSubscribers = new Map(); // conversationId -> Set of clientIds
+
+/**
+ * Attach to a chat session
+ */
+async function handleChatAttach(clientId, ws, message) {
+  console.log(`[WS] handleChatAttach called for client ${clientId}:`, JSON.stringify(message));
+  const { conversationId, workspaceId } = message;
+
+  if (!conversationId) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      message: 'conversationId is required'
+    }));
+    return;
+  }
+
+  // Check if chat exists
+  if (!chatProcessManager.hasChat(conversationId)) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      conversationId,
+      message: 'Chat not found'
+    }));
+    return;
+  }
+
+  const client = clients.get(clientId);
+  if (!client) {
+    return;
+  }
+
+  // Initialize handlers map if needed
+  if (!client.chatHandlers) {
+    client.chatHandlers = new Map();
+  }
+
+  // Check if already attached - remove old handler first
+  if (client.chatHandlers.has(conversationId)) {
+    console.log(`[WS] Client ${clientId} already attached to chat ${conversationId}, removing old handler`);
+    const oldHandler = client.chatHandlers.get(conversationId);
+    chatProcessManager.removeOutputHandler(conversationId, oldHandler);
+    client.chatHandlers.delete(conversationId);
+  }
+
+  try {
+    // Attach to the chat process
+    const attachResult = await chatProcessManager.attachChat(conversationId, clientId);
+    console.log(`[WS] Client ${clientId} attached to chat session ${conversationId}`);
+
+    // Track subscribers
+    if (!chatSubscribers.has(conversationId)) {
+      chatSubscribers.set(conversationId, new Set());
+    }
+    chatSubscribers.get(conversationId).add(clientId);
+
+    // Track for client cleanup
+    client.subscribedTerminals.add(conversationId);
+
+    // Set up output handler - forwards structured events to client
+    const outputHandler = (event) => {
+      const c = clients.get(clientId);
+      if (c && c.ws.readyState === 1) {
+        // Send structured event directly
+        c.ws.send(JSON.stringify({
+          type: 'chatEvent',
+          conversationId,
+          event
+        }));
+      }
+    };
+
+    // Store handler reference for cleanup
+    client.chatHandlers.set(conversationId, outputHandler);
+    chatProcessManager.addOutputHandler(conversationId, outputHandler);
+
+    const chatInfo = chatProcessManager.getChat(conversationId);
+
+    // Send attachment confirmation
+    ws.send(JSON.stringify({
+      type: 'chatAttached',
+      conversationId,
+      tool: chatInfo?.tool || 'unknown',
+      workspacePath: workspaceId,
+      status: attachResult.status,
+      message: 'Attached to chat session'
+    }));
+
+    // Send buffered messages (conversation history)
+    const bufferedMessages = attachResult.bufferedMessages || [];
+    if (bufferedMessages.length > 0) {
+      ws.send(JSON.stringify({
+        type: 'chatHistory',
+        conversationId,
+        messages: bufferedMessages
+      }));
+      console.log(`[WS] Sent ${bufferedMessages.length} buffered messages to client ${clientId}`);
+    }
+
+    console.log(`Client ${clientId} attached to chat ${conversationId} (tool: ${chatInfo?.tool})`);
+  } catch (error) {
+    console.error(`[WS] Failed to attach to chat ${conversationId}:`, error);
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      conversationId,
+      message: `Failed to attach to chat: ${error.message}`
+    }));
+  }
+}
+
+/**
+ * Detach from a chat session
+ */
+function handleChatDetach(clientId, message) {
+  const { conversationId } = message;
+
+  if (!conversationId) return;
+
+  const client = clients.get(clientId);
+
+  const subscribers = chatSubscribers.get(conversationId);
+  if (subscribers) {
+    subscribers.delete(clientId);
+    if (subscribers.size === 0) {
+      chatSubscribers.delete(conversationId);
+    }
+  }
+
+  // Remove output handler
+  if (client && client.chatHandlers) {
+    const handler = client.chatHandlers.get(conversationId);
+    if (handler) {
+      chatProcessManager.removeOutputHandler(conversationId, handler);
+      client.chatHandlers.delete(conversationId);
+    }
+  }
+
+  if (client) {
+    client.subscribedTerminals.delete(conversationId);
+  }
+
+  console.log(`Client ${clientId} detached from chat ${conversationId}`);
+}
+
+/**
+ * Send a message to a chat session
+ */
+async function handleChatMessage(clientId, ws, message) {
+  console.log(`[WS] handleChatMessage called for client ${clientId}:`, JSON.stringify(message));
+  const { conversationId, content } = message;
+
+  if (!conversationId || content === undefined) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      conversationId,
+      message: 'conversationId and content are required'
+    }));
+    return;
+  }
+
+  if (!chatProcessManager.hasChat(conversationId)) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      conversationId,
+      message: 'Chat not found'
+    }));
+    return;
+  }
+
+  try {
+    const result = await chatProcessManager.sendMessage(conversationId, content);
+
+    // Confirm message was sent
+    ws.send(JSON.stringify({
+      type: 'chatMessageSent',
+      conversationId,
+      messageId: result.messageId
+    }));
+
+    console.log(`[WS] Sent message to chat ${conversationId}: ${content.substring(0, 50)}...`);
+  } catch (error) {
+    console.error(`[WS] Failed to send message to chat ${conversationId}:`, error);
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      conversationId,
+      message: error.message
+    }));
+  }
+}
+
+/**
+ * Send approval response to a chat session
+ */
+async function handleChatApproval(clientId, ws, message) {
+  const { conversationId, approved, blockId } = message;
+
+  if (!conversationId || approved === undefined) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      message: 'conversationId and approved are required'
+    }));
+    return;
+  }
+
+  try {
+    // Pass blockId (the tool_use_id) so sendApproval can find the specific denied tool
+    await chatProcessManager.sendApproval(conversationId, approved, blockId);
+    console.log(`[WS] Sent approval (${approved}) for block ${blockId} to chat ${conversationId}`);
+  } catch (error) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      conversationId,
+      message: error.message
+    }));
+  }
+}
+
+/**
+ * Cancel/interrupt a chat session
+ */
+async function handleChatCancel(clientId, ws, message) {
+  const { conversationId } = message;
+
+  if (!conversationId) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      message: 'conversationId is required'
+    }));
+    return;
+  }
+
+  try {
+    await chatProcessManager.cancelChat(conversationId);
+
+    ws.send(JSON.stringify({
+      type: 'chatCancelled',
+      conversationId,
+      message: 'Chat interrupted'
+    }));
+
+    console.log(`[WS] Cancelled chat ${conversationId}`);
+  } catch (error) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      conversationId,
+      message: error.message
+    }));
+  }
 }

@@ -74,6 +74,23 @@ router.get('/tools-status', async (req, res) => {
   }
 });
 
+// Get available AI models for chat
+// Returns a static list of known Claude model aliases and versions
+router.get('/models', async (req, res) => {
+  try {
+    const models = [
+      { id: 'sonnet', name: 'Claude Sonnet (latest)', isDefault: true, isCurrent: true },
+      { id: 'opus', name: 'Claude Opus (latest)', isDefault: false, isCurrent: false },
+      { id: 'haiku', name: 'Claude Haiku (latest)', isDefault: false, isCurrent: false },
+    ];
+
+    res.json({ models, cached: false });
+  } catch (error) {
+    console.error('[System] Error fetching models:', error);
+    res.status(500).json({ error: 'Failed to fetch models' });
+  }
+});
+
 // Build and run iOS app via Xcode
 router.post('/ios-build-run', async (req, res) => {
   try {
