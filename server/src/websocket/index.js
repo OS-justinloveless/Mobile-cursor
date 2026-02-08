@@ -312,19 +312,23 @@ export function broadcast(message) {
 }
 
 // Cleanup on shutdown
-export function cleanup() {
+export async function cleanup() {
   for (const [, watcherInfo] of watchers) {
     watcherInfo.watcher.close();
   }
   watchers.clear();
-  
+
   // Clean up PTY terminals
   ptyManager.cleanup();
   ptySubscribers.clear();
-  
+
   // Clean up tmux attached windows (but don't kill tmux sessions - they persist)
   tmuxManager.cleanup();
   tmuxSubscribers.clear();
+
+  // Clean up chat processes
+  await chatProcessManager.cleanup();
+  chatSubscribers.clear();
 }
 
 // ============ Terminal Handlers ============
@@ -1080,7 +1084,7 @@ function handleChatDetach(clientId, message) {
  */
 async function handleChatMessage(clientId, ws, message) {
   console.log(`[WS] handleChatMessage called for client ${clientId}:`, JSON.stringify(message));
-  const { conversationId, content } = message;
+  const { conversationId, content, mode } = message;
 
   if (!conversationId || content === undefined) {
     ws.send(JSON.stringify({
@@ -1101,6 +1105,12 @@ async function handleChatMessage(clientId, ws, message) {
   }
 
   try {
+    // Check if mode has changed and handle mode switching
+    if (mode && chatProcessManager.needsModeSwitch(conversationId, mode)) {
+      console.log(`[WS] Mode switch requested for ${conversationId}: ${mode}`);
+      await chatProcessManager.switchMode(conversationId, mode);
+    }
+
     const result = await chatProcessManager.sendMessage(conversationId, content);
 
     // Confirm message was sent
