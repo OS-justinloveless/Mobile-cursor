@@ -437,11 +437,12 @@ struct ChatSessionView: View {
             messageContent = "--model \(model.id) \(content)"
         }
 
-        // Send via WebSocket
+        // Send via WebSocket with mode
         chatManager.sendMessage(
             chat.effectiveTerminalId,
             content: messageContent,
-            workspaceId: project.id
+            workspaceId: project.id,
+            mode: selectedMode.rawValue
         )
 
         scrollToBottom = true

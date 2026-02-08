@@ -915,16 +915,18 @@ class APIService {
         topic: String? = nil,
         model: String? = nil,
         mode: ChatMode = .agent,
+        permissionMode: PermissionMode = .defaultMode,
         initialPrompt: String? = nil
     ) async throws -> ChatWindowResponse {
         logAsync(.info, "API", "Creating chat window", data: ["projectId": projectId, "tool": tool, "topic": topic ?? "auto"])
-        
+
         var bodyDict: [String: Any] = [
             "projectId": projectId,
             "tool": tool,
-            "mode": mode.rawValue
+            "mode": mode.rawValue,
+            "permissionMode": permissionMode.rawValue
         ]
-        
+
         if let projectPath = projectPath {
             bodyDict["projectPath"] = projectPath
         }
@@ -1278,7 +1280,7 @@ class APIService {
     
     /// Create a new branch
     func gitCreateBranch(projectId: String, name: String, checkout: Bool = true, repoPath: String? = nil) async throws -> GitOperationResponse {
-        let request = GitCreateBranchRequest(name: name, checkout: checkout)
+        let request = GitCreateBranchRequest(name: name, checkout: checkout, startPoint: nil)
         let body = try JSONEncoder().encode(request)
         var queryItems: [URLQueryItem] = []
         if let repoPath = repoPath, repoPath != "." {
@@ -1299,10 +1301,13 @@ class APIService {
     }
     
     /// Get diff for a file with full response including truncation info
-    func gitDiffFull(projectId: String, file: String, staged: Bool = false, repoPath: String? = nil) async throws -> (diff: String, truncated: Bool, totalLines: Int) {
+    func gitDiffFull(projectId: String, file: String, staged: Bool = false, commitHash: String? = nil, repoPath: String? = nil) async throws -> (diff: String, truncated: Bool, totalLines: Int) {
         var queryItems = [URLQueryItem(name: "file", value: file)]
         if staged {
             queryItems.append(URLQueryItem(name: "staged", value: "true"))
+        }
+        if let commitHash = commitHash {
+            queryItems.append(URLQueryItem(name: "commitHash", value: commitHash))
         }
         if let repoPath = repoPath, repoPath != "." {
             queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
@@ -1367,9 +1372,12 @@ class APIService {
         }
     }
     
-    /// Get recent commits
-    func gitLog(projectId: String, limit: Int = 10, repoPath: String? = nil) async throws -> [GitCommit] {
-        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+    /// Get recent commits (with graph data: parents, refs)
+    func gitLog(projectId: String, limit: Int = 10, skip: Int = 0, repoPath: String? = nil) async throws -> [GitCommit] {
+        var queryItems = [
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "skip", value: String(skip))
+        ]
         if let repoPath = repoPath, repoPath != "." {
             queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
         }
@@ -1377,6 +1385,116 @@ class APIService {
         do {
             let response = try decoder.decode(GitLogResponse.self, from: data)
             return response.commits
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Get detailed info for a single commit
+    func gitCommitDetail(projectId: String, hash: String, repoPath: String? = nil) async throws -> GitCommitDetail {
+        var queryItems: [URLQueryItem] = []
+        if let repoPath = repoPath, repoPath != "." {
+            queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
+        }
+        let data = try await makeRequest(endpoint: "/api/git/\(projectId)/commit/\(hash)", queryItems: queryItems.isEmpty ? nil : queryItems)
+        do {
+            return try decoder.decode(GitCommitDetail.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Checkout a commit in detached HEAD mode
+    func gitCheckoutDetached(projectId: String, hash: String, repoPath: String? = nil) async throws -> GitOperationResponse {
+        let request = GitHashRequest(hash: hash)
+        let body = try JSONEncoder().encode(request)
+        var queryItems: [URLQueryItem] = []
+        if let repoPath = repoPath, repoPath != "." {
+            queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
+        }
+        let data = try await makeRequest(endpoint: "/api/git/\(projectId)/checkout-detached", method: "POST", body: body, queryItems: queryItems.isEmpty ? nil : queryItems)
+        do {
+            return try decoder.decode(GitOperationResponse.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Cherry-pick a commit onto the current branch
+    func gitCherryPick(projectId: String, hash: String, repoPath: String? = nil) async throws -> GitOperationResponse {
+        let request = GitHashRequest(hash: hash)
+        let body = try JSONEncoder().encode(request)
+        var queryItems: [URLQueryItem] = []
+        if let repoPath = repoPath, repoPath != "." {
+            queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
+        }
+        let data = try await makeRequest(endpoint: "/api/git/\(projectId)/cherry-pick", method: "POST", body: body, queryItems: queryItems.isEmpty ? nil : queryItems)
+        do {
+            return try decoder.decode(GitOperationResponse.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Revert a commit (creates a new revert commit)
+    func gitRevertCommit(projectId: String, hash: String, repoPath: String? = nil) async throws -> GitOperationResponse {
+        let request = GitHashRequest(hash: hash)
+        let body = try JSONEncoder().encode(request)
+        var queryItems: [URLQueryItem] = []
+        if let repoPath = repoPath, repoPath != "." {
+            queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
+        }
+        let data = try await makeRequest(endpoint: "/api/git/\(projectId)/revert-commit", method: "POST", body: body, queryItems: queryItems.isEmpty ? nil : queryItems)
+        do {
+            return try decoder.decode(GitOperationResponse.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Create a tag on a commit
+    func gitCreateTag(projectId: String, name: String, hash: String? = nil, message: String? = nil, repoPath: String? = nil) async throws -> GitOperationResponse {
+        let request = GitTagRequest(name: name, hash: hash, message: message)
+        let body = try JSONEncoder().encode(request)
+        var queryItems: [URLQueryItem] = []
+        if let repoPath = repoPath, repoPath != "." {
+            queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
+        }
+        let data = try await makeRequest(endpoint: "/api/git/\(projectId)/tag", method: "POST", body: body, queryItems: queryItems.isEmpty ? nil : queryItems)
+        do {
+            return try decoder.decode(GitOperationResponse.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Reset to a commit
+    func gitReset(projectId: String, hash: String, mode: String = "mixed", repoPath: String? = nil) async throws -> GitOperationResponse {
+        let request = GitResetRequest(hash: hash, mode: mode)
+        let body = try JSONEncoder().encode(request)
+        var queryItems: [URLQueryItem] = []
+        if let repoPath = repoPath, repoPath != "." {
+            queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
+        }
+        let data = try await makeRequest(endpoint: "/api/git/\(projectId)/reset", method: "POST", body: body, queryItems: queryItems.isEmpty ? nil : queryItems)
+        do {
+            return try decoder.decode(GitOperationResponse.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Create a branch from a specific commit
+    func gitCreateBranchFrom(projectId: String, name: String, startPoint: String, checkout: Bool = true, repoPath: String? = nil) async throws -> GitOperationResponse {
+        let request = GitCreateBranchRequest(name: name, checkout: checkout, startPoint: startPoint)
+        let body = try JSONEncoder().encode(request)
+        var queryItems: [URLQueryItem] = []
+        if let repoPath = repoPath, repoPath != "." {
+            queryItems.append(URLQueryItem(name: "repoPath", value: repoPath))
+        }
+        let data = try await makeRequest(endpoint: "/api/git/\(projectId)/branch", method: "POST", body: body, queryItems: queryItems.isEmpty ? nil : queryItems)
+        do {
+            return try decoder.decode(GitOperationResponse.self, from: data)
         } catch {
             throw APIError.decodingError(error)
         }

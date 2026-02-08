@@ -43,9 +43,9 @@ enum ChatMode: String, CaseIterable, Identifiable, Codable {
     case agent = "agent"
     case plan = "plan"
     case ask = "ask"
-    
+
     var id: String { rawValue }
-    
+
     var displayName: String {
         switch self {
         case .agent: return "Agent"
@@ -53,12 +53,60 @@ enum ChatMode: String, CaseIterable, Identifiable, Codable {
         case .ask: return "Ask"
         }
     }
-    
+
     var description: String {
         switch self {
         case .agent: return "Full agent with file editing"
         case .plan: return "Read-only planning mode"
         case .ask: return "Q&A style explanations"
+        }
+    }
+}
+
+// MARK: - Permission Mode
+
+/// Permission mode for chat actions (maps to Claude CLI --permission-mode)
+enum PermissionMode: String, CaseIterable, Identifiable, Codable {
+    case defaultMode = "default"
+    case acceptEdits = "acceptEdits"
+    case bypassPermissions = "bypassPermissions"
+    case dontAsk = "dontAsk"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .defaultMode: return "Default"
+        case .acceptEdits: return "Accept Edits"
+        case .bypassPermissions: return "Accept All (YOLO)"
+        case .dontAsk: return "Don't Ask"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .defaultMode: return "Prompt for file edits and commands, auto-approve reads"
+        case .acceptEdits: return "Auto-approve file edits, still ask for commands"
+        case .bypassPermissions: return "Auto-approve all actions (use with caution)"
+        case .dontAsk: return "Never prompt, deny unapproved actions"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .defaultMode: return "hand.raised"
+        case .acceptEdits: return "pencil"
+        case .bypassPermissions: return "bolt.fill"
+        case .dontAsk: return "hand.raised.slash"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .defaultMode: return .blue
+        case .acceptEdits: return .green
+        case .bypassPermissions: return .orange
+        case .dontAsk: return .red
         }
     }
 }

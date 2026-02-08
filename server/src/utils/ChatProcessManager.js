@@ -4,6 +4,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 import { getCLIAdapter, getSupportedTools } from './CLIAdapter.js';
+import { ChatPersistenceStore } from './ChatPersistenceStore.js';
 
 /**
  * ChatProcessManager - Manages AI CLI chat processes with structured JSON output
@@ -26,6 +27,12 @@ class ChatProcessManager extends EventEmitter {
 
     // Max messages to buffer per conversation
     this.maxBufferSize = 100;
+
+    // Initialize persistence store
+    this.persistenceStore = ChatPersistenceStore.getInstance();
+    this.persistenceStore.init().catch(err => {
+      console.error('[ChatProcessManager] Failed to initialize persistence store:', err);
+    });
   }
 
   /**
@@ -47,6 +54,7 @@ class ChatProcessManager extends EventEmitter {
       topic,
       model,
       mode = 'agent',
+      permissionMode = 'default',
       sessionId,  // For resuming sessions
       initialPrompt,  // Optional initial message to send after CLI starts
     } = options;
@@ -78,6 +86,7 @@ class ChatProcessManager extends EventEmitter {
     const args = this.buildCLIArgs(tool, {
       model,
       mode,
+      permissionMode,
       sessionId,
       projectPath,
     });
@@ -107,6 +116,21 @@ class ChatProcessManager extends EventEmitter {
     this.contentBlockIds.set(conversationId, new Map());  // Track block IDs by index for streaming
     this.pendingPermissions.set(conversationId, new Map()); // Track permission denials awaiting user approval
 
+    // Save conversation to persistence store
+    await this.persistenceStore.saveConversation({
+      id: conversationId,
+      tool,
+      topic: chatInfo.topic,
+      model,
+      mode,
+      projectPath,
+      status: chatInfo.status,
+      createdAt: chatInfo.createdAt,
+      sessionId: chatInfo.sessionId || null,
+    }).catch(err => {
+      console.error(`[ChatProcessManager] Failed to save conversation ${conversationId}:`, err);
+    });
+
     return {
       conversationId,
       tool,
@@ -122,7 +146,7 @@ class ChatProcessManager extends EventEmitter {
    * Build CLI arguments for the specified tool
    */
   buildCLIArgs(tool, options = {}) {
-    const { model, mode, sessionId, projectPath } = options;
+    const { model, mode, permissionMode = 'default', sessionId, projectPath } = options;
     const args = [];
 
     switch (tool) {
@@ -140,13 +164,12 @@ class ChatProcessManager extends EventEmitter {
           args.push('--model', model);
         }
 
-        // Always enable permission mode so the CLI asks before destructive actions.
-        // In 'plan' mode use 'plan'; otherwise use 'default' which prompts for
-        // file edits and commands while auto-approving reads.
-        if (mode === 'plan') {
+        // Set permission mode based on what was requested
+        // In 'plan' mode, default to 'plan' permission mode unless explicitly overridden
+        if (mode === 'plan' && permissionMode === 'default') {
           args.push('--permission-mode', 'plan');
         } else {
-          args.push('--permission-mode', 'default');
+          args.push('--permission-mode', permissionMode);
         }
 
         // Resume session if sessionId provided
@@ -212,6 +235,11 @@ class ChatProcessManager extends EventEmitter {
     chatInfo.status = 'running';
     chatInfo.pid = childProcess.pid;
 
+    // Update status in persistence store
+    await this.persistenceStore.updateConversationStatus(conversationId, 'running').catch(err => {
+      console.error(`[ChatProcessManager] Failed to update conversation status:`, err);
+    });
+
     // Handle stdout - parse JSON events
     let stdoutBuffer = '';
     childProcess.stdout.on('data', (data) => {
@@ -247,6 +275,11 @@ class ChatProcessManager extends EventEmitter {
       chatInfo.status = 'ended';
       chatInfo.exitCode = code;
       chatInfo.exitSignal = signal;
+
+      // Update status in persistence store
+      this.persistenceStore.updateConversationStatus(conversationId, 'ended').catch(err => {
+        console.error(`[ChatProcessManager] Failed to update conversation status on exit:`, err);
+      });
 
       this.notifyHandlers(conversationId, {
         id: `session_end-${Date.now()}`,
@@ -700,6 +733,13 @@ class ChatProcessManager extends EventEmitter {
         buffer.shift();
       }
     }
+
+    // Save complete (non-partial) messages to persistence store
+    if (!message.isPartial) {
+      this.persistenceStore.saveMessage(conversationId, message).catch(err => {
+        console.error(`[ChatProcessManager] Failed to save message to persistence:`, err);
+      });
+    }
   }
 
   /**
@@ -1011,6 +1051,11 @@ class ChatProcessManager extends EventEmitter {
 
     console.log(`[ChatProcessManager] Closing chat ${conversationId}`);
 
+    // Update status in persistence store
+    await this.persistenceStore.updateConversationStatus(conversationId, 'ended').catch(err => {
+      console.error(`[ChatProcessManager] Failed to update conversation status on close:`, err);
+    });
+
     // Kill process if running
     if (chatInfo.process) {
       chatInfo.process.kill('SIGTERM');
@@ -1074,10 +1119,186 @@ class ChatProcessManager extends EventEmitter {
   }
 
   /**
+   * Check if a mode switch is needed for a conversation
+   */
+  needsModeSwitch(conversationId, newMode) {
+    const chatInfo = this.processes.get(conversationId);
+    if (!chatInfo) {
+      return false;
+    }
+
+    // Check if the requested mode is different from the current mode
+    return chatInfo.mode !== newMode;
+  }
+
+  /**
+   * Switch the mode of a running chat session
+   * This kills the current process and restarts it with the new permission mode
+   */
+  async switchMode(conversationId, newMode) {
+    const chatInfo = this.processes.get(conversationId);
+    if (!chatInfo) {
+      throw new Error(`Chat not found: ${conversationId}`);
+    }
+
+    console.log(`[ChatProcessManager] Switching mode for ${conversationId} from ${chatInfo.mode} to ${newMode}`);
+
+    // Store current state
+    const oldMode = chatInfo.mode;
+    const wasRunning = chatInfo.process && chatInfo.status === 'running';
+
+    // Kill the current process if running
+    if (chatInfo.process) {
+      console.log(`[ChatProcessManager] Killing current process for mode switch`);
+      chatInfo.process.kill('SIGTERM');
+      chatInfo.process = null;
+    }
+
+    // Update mode and rebuild CLI args
+    chatInfo.mode = newMode;
+    chatInfo.args = this.buildCLIArgs(chatInfo.tool, {
+      model: chatInfo.model,
+      mode: newMode,
+      sessionId: chatInfo.sessionId,
+      projectPath: chatInfo.projectPath,
+    });
+
+    // Notify handlers about the mode switch
+    this.notifyHandlers(conversationId, {
+      id: `mode-switch-${Date.now()}`,
+      type: 'system',
+      conversationId,
+      content: `Mode switched from ${oldMode} to ${newMode}`,
+      timestamp: Date.now(),
+    });
+
+    // If the process was running, restart it
+    if (wasRunning) {
+      console.log(`[ChatProcessManager] Restarting process with new mode: ${newMode}`);
+      chatInfo.status = 'created';
+
+      // Attach will spawn a new process
+      try {
+        await this.attachChat(conversationId, 'system');
+        console.log(`[ChatProcessManager] Successfully restarted chat with mode: ${newMode}`);
+      } catch (error) {
+        console.error(`[ChatProcessManager] Failed to restart chat after mode switch:`, error);
+        throw new Error(`Failed to restart chat with new mode: ${error.message}`);
+      }
+    }
+
+    return { success: true, oldMode, newMode };
+  }
+
+  /**
+   * Check if a mode switch is needed for a conversation
+   */
+  needsModeSwitch(conversationId, newMode) {
+    const chatInfo = this.processes.get(conversationId);
+    if (!chatInfo) {
+      return false;
+    }
+
+    // Check if the requested mode is different from the current mode
+    return chatInfo.mode !== newMode;
+  }
+
+  /**
+   * Switch the mode of a running chat session
+   * This kills the current process and restarts it with the new permission mode
+   */
+  async switchMode(conversationId, newMode) {
+    const chatInfo = this.processes.get(conversationId);
+    if (!chatInfo) {
+      throw new Error(`Chat not found: ${conversationId}`);
+    }
+
+    console.log(`[ChatProcessManager] Switching mode for ${conversationId} from ${chatInfo.mode} to ${newMode}`);
+
+    // Store current state
+    const oldMode = chatInfo.mode;
+    const wasRunning = chatInfo.process && chatInfo.status === 'running';
+
+    // Kill the current process if running
+    if (chatInfo.process) {
+      console.log(`[ChatProcessManager] Killing current process for mode switch`);
+      chatInfo.process.kill('SIGTERM');
+      chatInfo.process = null;
+    }
+
+    // Update mode and rebuild CLI args
+    chatInfo.mode = newMode;
+    chatInfo.args = this.buildCLIArgs(chatInfo.tool, {
+      model: chatInfo.model,
+      mode: newMode,
+      sessionId: chatInfo.sessionId,
+      projectPath: chatInfo.projectPath,
+    });
+
+    // Notify handlers about the mode switch
+    this.notifyHandlers(conversationId, {
+      id: `mode-switch-${Date.now()}`,
+      type: 'system',
+      conversationId,
+      content: `Mode switched from ${oldMode} to ${newMode}`,
+      timestamp: Date.now(),
+    });
+
+    // If the process was running, restart it
+    if (wasRunning) {
+      console.log(`[ChatProcessManager] Restarting process with new mode: ${newMode}`);
+      chatInfo.status = 'created';
+
+      // Attach will spawn a new process
+      try {
+        await this.attachChat(conversationId, 'system');
+        console.log(`[ChatProcessManager] Successfully restarted chat with mode: ${newMode}`);
+      } catch (error) {
+        console.error(`[ChatProcessManager] Failed to restart chat after mode switch:`, error);
+        throw new Error(`Failed to restart chat with new mode: ${error.message}`);
+      }
+    }
+
+    return { success: true, oldMode, newMode };
+  }
+
+  /**
+   * Load persisted conversations on startup
+   * This restores conversation metadata but doesn't restart processes
+   */
+  async loadPersistedConversations() {
+    try {
+      const conversations = await this.persistenceStore.getAllConversations();
+      console.log(`[ChatProcessManager] Loading ${conversations.length} persisted conversations`);
+
+      for (const conv of conversations) {
+        // Don't load ended conversations
+        if (conv.status === 'ended') {
+          continue;
+        }
+
+        // Mark running conversations as suspended (they're not actually running after restart)
+        if (conv.status === 'running' || conv.status === 'created') {
+          await this.persistenceStore.updateConversationStatus(conv.id, 'suspended');
+        }
+
+        console.log(`[ChatProcessManager] Loaded conversation ${conv.id} (${conv.tool}, status: ${conv.status})`);
+      }
+    } catch (err) {
+      console.error('[ChatProcessManager] Failed to load persisted conversations:', err);
+    }
+  }
+
+  /**
    * Cleanup all processes
    */
-  cleanup() {
+  async cleanup() {
     console.log('[ChatProcessManager] Cleaning up all chat processes');
+
+    // Suspend all active chats in persistence store
+    await this.persistenceStore.suspendAllActiveChats().catch(err => {
+      console.error('[ChatProcessManager] Failed to suspend active chats:', err);
+    });
 
     for (const [id, info] of this.processes) {
       if (info.process) {
@@ -1089,6 +1310,9 @@ class ChatProcessManager extends EventEmitter {
     this.outputHandlers.clear();
     this.messageBuffers.clear();
     this.pendingPermissions.clear();
+
+    // Stop auto-cleanup timer
+    this.persistenceStore.stopAutoCleanup();
   }
 }
 

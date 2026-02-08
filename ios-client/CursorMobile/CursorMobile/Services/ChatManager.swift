@@ -123,6 +123,7 @@ class ChatManager: ObservableObject {
         topic: String? = nil,
         model: String? = nil,
         mode: ChatMode = .agent,
+        permissionMode: PermissionMode = .defaultMode,
         initialPrompt: String? = nil
     ) async throws -> ChatWindow {
         guard let api = apiService else {
@@ -136,6 +137,7 @@ class ChatManager: ObservableObject {
             topic: topic,
             model: model,
             mode: mode,
+            permissionMode: permissionMode,
             initialPrompt: initialPrompt
         )
 
@@ -241,8 +243,8 @@ class ChatManager: ObservableObject {
     }
 
     /// Send a message to a chat
-    func sendMessage(_ conversationId: String, content: String, workspaceId: String? = nil) {
-        webSocketManager?.sendChatMessage(conversationId, content: content, workspaceId: workspaceId)
+    func sendMessage(_ conversationId: String, content: String, workspaceId: String? = nil, mode: String? = nil) {
+        webSocketManager?.sendChatMessage(conversationId, content: content, workspaceId: workspaceId, mode: mode)
     }
 
     /// Cancel/interrupt a chat session

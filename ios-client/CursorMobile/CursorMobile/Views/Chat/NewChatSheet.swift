@@ -11,6 +11,7 @@ struct NewChatSheet: View {
     @State private var selectedAgent: Agent?
     @State private var selectedModel: AIModel?
     @State private var selectedMode: ChatMode = .agent
+    @State private var selectedPermissionMode: PermissionMode = .defaultMode
     @State private var topic = ""
     @State private var initialPrompt = ""
 
@@ -64,6 +65,23 @@ struct NewChatSheet: View {
                     Text("Mode")
                 } footer: {
                     Text(selectedMode.description)
+                }
+
+                // Permission Mode Selection
+                Section {
+                    permissionModePicker
+                } header: {
+                    Text("Permissions")
+                } footer: {
+                    HStack(spacing: 4) {
+                        if selectedPermissionMode == .bypassPermissions {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                        }
+                        Text(selectedPermissionMode.description)
+                            .foregroundColor(selectedPermissionMode == .bypassPermissions ? .orange : .secondary)
+                    }
+                    .font(.caption)
                 }
 
                 // Optional Topic
@@ -170,6 +188,35 @@ struct NewChatSheet: View {
         }
     }
 
+    // MARK: - Permission Mode Picker
+
+    private var permissionModePicker: some View {
+        ForEach(PermissionMode.allCases) { mode in
+            Button {
+                selectedPermissionMode = mode
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: mode.icon)
+                        .font(.title2)
+                        .foregroundColor(mode.color)
+                        .frame(width: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(mode.displayName)
+                            .foregroundColor(.primary)
+                    }
+
+                    Spacer()
+
+                    if selectedPermissionMode == mode {
+                        Image(systemName: "checkmark")
+                            .foregroundColor(.accentColor)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Model Picker
 
     private var modelPicker: some View {
@@ -220,6 +267,7 @@ struct NewChatSheet: View {
                     topic: topic.isEmpty ? nil : topic,
                     model: selectedModel?.id,
                     mode: selectedMode,
+                    permissionMode: selectedPermissionMode,
                     initialPrompt: initialPrompt.isEmpty ? nil : initialPrompt
                 )
 

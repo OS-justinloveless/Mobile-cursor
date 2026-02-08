@@ -553,7 +553,7 @@ class WebSocketManager: ObservableObject {
     }
     
     /// Send a message to a chat conversation
-    func sendChatMessage(_ conversationId: String, content: String, workspaceId: String? = nil) {
+    func sendChatMessage(_ conversationId: String, content: String, workspaceId: String? = nil, mode: String? = nil) {
         var message: [String: Any] = [
             "type": "chatMessage",
             "conversationId": conversationId,
@@ -561,6 +561,9 @@ class WebSocketManager: ObservableObject {
         ]
         if let workspaceId = workspaceId {
             message["workspaceId"] = workspaceId
+        }
+        if let mode = mode {
+            message["mode"] = mode
         }
         print("WebSocket: Sending chatMessage: \(message)")
         send(message)

@@ -133,6 +133,7 @@ router.post('/', async (req, res) => {
       topic,
       model,
       mode = 'agent',
+      permissionMode = 'default',
       sessionId,  // For resuming sessions
       initialPrompt,  // Optional initial message to send after CLI starts
     } = req.body;
@@ -143,7 +144,8 @@ router.post('/', async (req, res) => {
       tool,
       topic,
       model,
-      mode
+      mode,
+      permissionMode
     });
 
     // Resolve project path
@@ -192,6 +194,7 @@ router.post('/', async (req, res) => {
       topic,
       model,
       mode,
+      permissionMode,
       sessionId,
       initialPrompt,
     });
