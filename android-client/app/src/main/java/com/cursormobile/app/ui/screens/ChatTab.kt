@@ -15,10 +15,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursormobile.app.data.AuthManager
+import com.cursormobile.app.data.ChatPreferencesManager
 import com.cursormobile.app.data.models.ChatMode
+import com.cursormobile.app.data.models.ChatTool
 import com.cursormobile.app.data.models.Conversation
 import com.cursormobile.app.data.models.Project
 import kotlinx.coroutines.launch
@@ -346,9 +349,17 @@ private fun NewChatSheet(
     onDismiss: () -> Unit,
     onChatCreated: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val prefsManager = remember { ChatPreferencesManager.getInstance(context) }
     val scope = rememberCoroutineScope()
-    var selectedTool by remember { mutableStateOf(ChatTool.CURSOR_AGENT) }
-    var selectedMode by remember { mutableStateOf(ChatMode.AGENT) }
+
+    // Load saved preferences or use defaults
+    var selectedTool by remember {
+        mutableStateOf(prefsManager.getLastTool() ?: ChatTool.CURSOR_AGENT)
+    }
+    var selectedMode by remember {
+        mutableStateOf(prefsManager.getLastMode() ?: ChatMode.AGENT)
+    }
     var isCreating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -365,6 +376,11 @@ private fun NewChatSheet(
                         "tool" to selectedTool.value
                     )
                     val response = api.createConversation(body)
+                    // Save preferences for next time
+                    prefsManager.savePreferences(
+                        tool = selectedTool,
+                        mode = selectedMode
+                    )
                     onChatCreated(response.chatId)
                 }
             } catch (e: Exception) {

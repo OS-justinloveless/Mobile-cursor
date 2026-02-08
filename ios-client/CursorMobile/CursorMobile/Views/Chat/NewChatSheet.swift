@@ -139,13 +139,7 @@ struct NewChatSheet: View {
                 }
             }
             .onAppear {
-                // Set defaults
-                if selectedAgent == nil {
-                    selectedAgent = chatManager.defaultAgent
-                }
-                if selectedModel == nil {
-                    selectedModel = chatManager.defaultModel
-                }
+                loadPreferences()
             }
         }
     }
@@ -249,6 +243,49 @@ struct NewChatSheet: View {
 
     // MARK: - Actions
 
+    private func loadPreferences() {
+        let prefsManager = ChatPreferencesManager.shared
+
+        // Try to load last selected agent by ID
+        if let lastAgentId = prefsManager.lastAgentId() {
+            selectedAgent = chatManager.agents.first { $0.id == lastAgentId }
+        }
+
+        // Fallback to default agent if no saved preference or agent not found
+        if selectedAgent == nil {
+            selectedAgent = chatManager.defaultAgent
+        }
+
+        // Try to load last selected model by ID
+        if let lastModelId = prefsManager.lastModelId() {
+            selectedModel = chatManager.models.first { $0.id == lastModelId }
+        }
+
+        // Fallback to default model if no saved preference or model not found
+        if selectedModel == nil {
+            selectedModel = chatManager.defaultModel
+        }
+
+        // Load last mode (fallback to .agent)
+        if let lastMode = prefsManager.lastMode() {
+            selectedMode = lastMode
+        }
+
+        // Load last permission mode (fallback to .defaultMode)
+        if let lastPermissionMode = prefsManager.lastPermissionMode() {
+            selectedPermissionMode = lastPermissionMode
+        }
+    }
+
+    private func savePreferences() {
+        ChatPreferencesManager.shared.savePreferences(
+            agentId: selectedAgent?.id,
+            modelId: selectedModel?.id,
+            mode: selectedMode,
+            permissionMode: selectedPermissionMode
+        )
+    }
+
     private func createChat() {
         guard let agent = selectedAgent, agent.available else {
             error = "Please select an available agent"
@@ -273,6 +310,8 @@ struct NewChatSheet: View {
 
                 await MainActor.run {
                     isCreating = false
+                    // Save preferences for next time
+                    savePreferences()
                     onChatCreated(chat, initialPrompt.isEmpty ? nil : initialPrompt)
                     dismiss()
                 }

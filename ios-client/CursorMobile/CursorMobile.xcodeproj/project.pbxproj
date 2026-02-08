@@ -91,6 +91,7 @@
 		H00000000000000B /* NewChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000B /* NewChatSheet.swift */; };
 		H00000000000000C /* ConversationManagementSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000C /* ConversationManagementSheet.swift */; };
 		H00000000000000D /* BatchApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000D /* BatchApprovalView.swift */; };
+		H00000000000000E /* ChatPreferencesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000E /* ChatPreferencesManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -178,6 +179,7 @@
 		H10000000000000B /* NewChatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewChatSheet.swift; sourceTree = "<group>"; };
 		H10000000000000C /* ConversationManagementSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationManagementSheet.swift; sourceTree = "<group>"; };
 		H10000000000000D /* BatchApprovalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchApprovalView.swift; sourceTree = "<group>"; };
+		H10000000000000E /* ChatPreferencesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPreferencesManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -282,6 +284,7 @@
 				C100000000000001 /* SyntaxHighlightManager.swift */,
 				F100000000000070 /* LogManager.swift */,
 				H100000000000002 /* ChatManager.swift */,
+				H10000000000000E /* ChatPreferencesManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -557,6 +560,7 @@
 				H00000000000000B /* NewChatSheet.swift in Sources */,
 				H00000000000000C /* ConversationManagementSheet.swift in Sources */,
 				H00000000000000D /* BatchApprovalView.swift in Sources */,
+				H00000000000000E /* ChatPreferencesManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
