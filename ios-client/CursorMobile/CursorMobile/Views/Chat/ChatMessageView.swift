@@ -10,6 +10,41 @@ struct ChatMessageView: View {
     var onInput: ((String, String) -> Void)?
     var onFileReference: ((String, Int?) -> Void)?
 
+    /// Groups consecutive approval request blocks together
+    private var blockGroups: [(blocks: [ChatContentBlock], isBatchApproval: Bool)] {
+        var groups: [(blocks: [ChatContentBlock], isBatchApproval: Bool)] = []
+        var currentApprovalBatch: [ChatContentBlock] = []
+
+        for block in message.blocks {
+            // Skip toolUseResult blocks - they're shown inside their toolUseStart
+            if block.type == .toolUseResult {
+                continue
+            }
+
+            if block.type == .approvalRequest {
+                // Add to current batch
+                currentApprovalBatch.append(block)
+            } else {
+                // If we have accumulated approval requests, add them as a batch
+                if !currentApprovalBatch.isEmpty {
+                    let shouldBatch = currentApprovalBatch.count > 1
+                    groups.append((blocks: currentApprovalBatch, isBatchApproval: shouldBatch))
+                    currentApprovalBatch = []
+                }
+                // Add this non-approval block as a single-item group
+                groups.append((blocks: [block], isBatchApproval: false))
+            }
+        }
+
+        // Don't forget any remaining approval requests
+        if !currentApprovalBatch.isEmpty {
+            let shouldBatch = currentApprovalBatch.count > 1
+            groups.append((blocks: currentApprovalBatch, isBatchApproval: shouldBatch))
+        }
+
+        return groups
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             if message.role == .assistant {
@@ -18,21 +53,37 @@ struct ChatMessageView: View {
             }
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                ForEach(message.blocks) { block in
-                    // Skip toolUseResult blocks - they're shown inside their toolUseStart
-                    if block.type != .toolUseResult {
-                        ContentBlockView(
-                            block: block,
-                            allBlocks: message.blocks,
-                            allConversationBlocks: allConversationBlocks,
-                            projectPath: projectPath,
-                            respondedApprovalIds: respondedApprovalIds,
-                            onApproval: onApproval,
-                            onInput: onInput,
-                            onFileReference: onFileReference
+                ForEach(Array(blockGroups.enumerated()), id: \.offset) { index, group in
+                    if group.isBatchApproval {
+                        // Render batch approval view
+                        let hasResponded = group.blocks.allSatisfy { respondedApprovalIds.contains($0.id) }
+                        BatchApprovalView(
+                            approvalBlocks: group.blocks,
+                            hasResponded: hasResponded,
+                            onBatchApproval: { approved in
+                                // Send approval for each block in the batch
+                                for block in group.blocks {
+                                    onApproval?(block.id, approved)
+                                }
+                            }
                         )
-                        // Force view update when block content or status changes
-                        .id("\(block.id)-\(block.content?.hashValue ?? 0)-\(block.isPartial ?? true)")
+                        .id("batch-\(index)")
+                    } else {
+                        // Render individual blocks normally
+                        ForEach(group.blocks) { block in
+                            ContentBlockView(
+                                block: block,
+                                allBlocks: message.blocks,
+                                allConversationBlocks: allConversationBlocks,
+                                projectPath: projectPath,
+                                respondedApprovalIds: respondedApprovalIds,
+                                onApproval: onApproval,
+                                onInput: onInput,
+                                onFileReference: onFileReference
+                            )
+                            // Force view update when block content or status changes
+                            .id("\(block.id)-\(block.content?.hashValue ?? 0)-\(block.isPartial ?? true)")
+                        }
                     }
                 }
 
