@@ -294,6 +294,13 @@ struct ChatSessionView: View {
                 continue
             }
 
+            // Handle topic update - update displayed topic without adding to messages
+            if block.type == .topicUpdated, let newTopic = block.topic {
+                print("[ChatSessionView] Topic auto-updated to: \(newTopic)")
+                chatTopic = newTopic
+                continue
+            }
+
             // Handle session end - finalize current message
             if block.type == .sessionEnd {
                 print("[ChatSessionView] session_end received, currentAssistantMessage has \(currentAssistantMessage?.blocks.count ?? 0) blocks")

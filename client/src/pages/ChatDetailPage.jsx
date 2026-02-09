@@ -78,6 +78,8 @@ export default function ChatDetailPage() {
         setSendStatus({ type: 'success', message: 'Prompt sent to terminal!' });
         // Focus input for next prompt
         inputRef.current?.focus();
+        // Reload chat details to pick up auto-generated topic
+        loadChatDetails();
       } else {
         setSendStatus({ type: 'error', message: data.error || 'Failed to send prompt' });
       }

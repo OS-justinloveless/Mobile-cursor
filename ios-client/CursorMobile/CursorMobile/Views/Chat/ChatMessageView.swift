@@ -188,6 +188,9 @@ struct ContentBlockView: View {
 
         case .usage:
             usageBlockView
+
+        case .topicUpdated:
+            EmptyView()
         }
     }
 

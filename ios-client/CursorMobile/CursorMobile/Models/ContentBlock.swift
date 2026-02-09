@@ -22,6 +22,7 @@ enum ContentBlockType: String, Codable, CaseIterable {
     case sessionStart = "session_start"
     case sessionEnd = "session_end"
     case usage = "usage"
+    case topicUpdated = "topic_updated"
     
     /// Icon for this block type
     var icon: String {
@@ -43,6 +44,7 @@ enum ContentBlockType: String, Codable, CaseIterable {
         case .sessionStart: return "play.circle"
         case .sessionEnd: return "stop.circle"
         case .usage: return "chart.bar"
+        case .topicUpdated: return "tag"
         }
     }
     
@@ -66,6 +68,7 @@ enum ContentBlockType: String, Codable, CaseIterable {
         case .sessionStart: return .green
         case .sessionEnd: return .gray
         case .usage: return .purple
+        case .topicUpdated: return .blue
         }
     }
 }
@@ -123,6 +126,9 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
     var isSuccess: Bool?
     var isMode: Bool?
     
+    // Topic update fields
+    var topic: String?
+    
     enum CodingKeys: String, CodingKey {
         case id, type, timestamp, content, isPartial
         case toolId, toolName, input, isError
@@ -134,6 +140,7 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
         case model, role, reason, suspended
         case inputTokens, outputTokens
         case isSuccess, isMode
+        case topic
     }
 
     // MARK: - Initializers
@@ -166,7 +173,8 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
         inputTokens: Int? = nil,
         outputTokens: Int? = nil,
         isSuccess: Bool? = nil,
-        isMode: Bool? = nil
+        isMode: Bool? = nil,
+        topic: String? = nil
     ) {
         self.id = id
         self.type = type
@@ -196,6 +204,7 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
         self.outputTokens = outputTokens
         self.isSuccess = isSuccess
         self.isMode = isMode
+        self.topic = topic
     }
     
     // MARK: - Convenience Properties
@@ -233,6 +242,8 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
             return suspended == true ? "Session suspended" : "Session ended"
         case .usage:
             return "Tokens: \(inputTokens ?? 0) in / \(outputTokens ?? 0) out"
+        case .topicUpdated:
+            return "Topic: \(topic ?? "")"
         }
     }
     
