@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - Chat Tools
 
@@ -202,6 +203,20 @@ struct ChatWindowResponse: Codable {
     }
 }
 
+/// Response from POST /api/conversations/:id/upload - file upload response for chat attachments
+struct ChatUploadFilesResponse: Codable {
+    let success: Bool
+    let conversationId: String
+    let attachments: [UploadedFileInfo]
+
+    struct UploadedFileInfo: Codable {
+        let id: String
+        let filename: String
+        let mimeType: String
+        let size: Int
+    }
+}
+
 // MARK: - AI Models
 
 /// Response from GET /api/system/models
@@ -400,8 +415,6 @@ struct ForkConversationResponse: Codable {
 }
 
 // MARK: - Media Selection Types (used by ImagePicker)
-
-import UIKit
 
 /// Model for a selected image
 struct SelectedImage: Identifiable, Equatable {

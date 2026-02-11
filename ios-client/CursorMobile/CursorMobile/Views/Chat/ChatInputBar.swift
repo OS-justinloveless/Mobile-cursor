@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 /// Message input bar with text input, mode picker, model picker, and send button
 struct ChatInputBar: View {
@@ -11,6 +12,7 @@ struct ChatInputBar: View {
     let onSend: () -> Void
     let onCancel: () -> Void
     let projectId: String
+    @Binding var attachments: [SelectedMedia]
 
     @EnvironmentObject var chatManager: ChatManager
 
@@ -18,6 +20,11 @@ struct ChatInputBar: View {
     @State private var autocompleteTrigger: AutocompleteTrigger?
     @State private var autocompleteQuery = ""
     @State private var suggestions: [Suggestion] = []
+
+    // Photo/file picker state
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var showImagePicker = false
+    @State private var showDocumentPicker = false
 
     @FocusState private var isTextFieldFocused: Bool
 
@@ -76,8 +83,42 @@ struct ChatInputBar: View {
             .padding(.horizontal)
             .padding(.top, 4)
 
+            // Attachment preview
+            if !attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(attachments) { media in
+                            attachmentThumbnail(media)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                }
+                .background(Color(.systemGray6))
+            }
+
             // Input area
             HStack(alignment: .bottom, spacing: 12) {
+                // Attachment button
+                Menu {
+                    Button {
+                        showImagePicker = true
+                    } label: {
+                        Label("Photos", systemImage: "photo.on.rectangle")
+                    }
+
+                    Button {
+                        showDocumentPicker = true
+                    } label: {
+                        Label("Documents", systemImage: "doc")
+                    }
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.title3)
+                        .foregroundColor(.accentColor)
+                }
+                .disabled(isStreaming)
+
                 // Text input
                 TextField("Message...", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -101,13 +142,20 @@ struct ChatInputBar: View {
                 } label: {
                     Image(systemName: isStreaming ? "stop.fill" : "arrow.up.circle.fill")
                         .font(.title)
-                        .foregroundColor(isStreaming ? .red : (text.isEmpty ? .secondary : .accentColor))
+                        .foregroundColor(isStreaming ? .red : (text.isEmpty && attachments.isEmpty ? .secondary : .accentColor))
                 }
-                .disabled(!isStreaming && text.isEmpty)
+                .disabled(!isStreaming && text.isEmpty && attachments.isEmpty)
             }
             .padding(.horizontal)
             .padding(.vertical, 12)
             .background(Color(.systemBackground))
+        }
+        .photosPicker(isPresented: $showImagePicker, selection: $selectedPhotos, maxSelectionCount: 5, matching: .images)
+        .fileImporter(isPresented: $showDocumentPicker, allowedContentTypes: [.pdf, .plainText, .json, .commaSeparatedText], allowsMultipleSelection: true) { result in
+            handleDocumentSelection(result)
+        }
+        .onChange(of: selectedPhotos) { _, newPhotos in
+            loadPhotos(newPhotos)
         }
     }
 
@@ -200,6 +248,68 @@ struct ChatInputBar: View {
         showAutocomplete = false
         autocompleteTrigger = nil
     }
+
+    // MARK: - Attachments
+
+    @ViewBuilder
+    private func attachmentThumbnail(_ media: SelectedMedia) -> some View {
+        ZStack(alignment: .topTrailing) {
+            // Thumbnail
+            if let thumbnail = media.thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 60, height: 60)
+                    .clipped()
+                    .cornerRadius(8)
+            }
+
+            // Remove button
+            Button {
+                removeAttachment(media)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                    .background(Color.black.opacity(0.6))
+                    .clipShape(Circle())
+            }
+            .padding(4)
+        }
+    }
+
+    private func loadPhotos(_ photos: [PhotosPickerItem]) {
+        Task {
+            for photo in photos {
+                if let data = try? await photo.loadTransferable(type: Data.self),
+                   let uiImage = UIImage(data: data) {
+                    let selectedImage = SelectedImage(image: uiImage)
+                    await MainActor.run {
+                        attachments.append(.image(selectedImage))
+                    }
+                }
+            }
+            // Clear selection
+            await MainActor.run {
+                selectedPhotos = []
+            }
+        }
+    }
+
+    private func handleDocumentSelection(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            // For now, we'll just show a message that documents are selected
+            // In a full implementation, we'd load the documents and add them to attachments
+            print("[ChatInputBar] Selected \(urls.count) document(s)")
+        case .failure(let error):
+            print("[ChatInputBar] Document selection error: \(error)")
+        }
+    }
+
+    private func removeAttachment(_ media: SelectedMedia) {
+        attachments.removeAll { $0.id == media.id }
+    }
 }
 
 // MARK: - Suggestion Row View
@@ -258,7 +368,8 @@ private struct SuggestionRowView: View {
             isStreaming: false,
             onSend: {},
             onCancel: {},
-            projectId: "test"
+            projectId: "test",
+            attachments: .constant([])
         )
         .environmentObject(ChatManager())
     }

@@ -252,8 +252,8 @@ class ChatManager: ObservableObject {
     }
 
     /// Send a message to a chat
-    func sendMessage(_ conversationId: String, content: String, workspaceId: String? = nil, mode: String? = nil) {
-        webSocketManager?.sendChatMessage(conversationId, content: content, workspaceId: workspaceId, mode: mode)
+    func sendMessage(_ conversationId: String, content: String, workspaceId: String? = nil, mode: String? = nil, attachments: [[String: Any]]? = nil) {
+        webSocketManager?.sendChatMessage(conversationId, content: content, workspaceId: workspaceId, mode: mode, attachments: attachments)
     }
 
     /// Cancel/interrupt a chat session
@@ -269,6 +269,11 @@ class ChatManager: ObservableObject {
     /// Send raw input
     func sendInput(_ conversationId: String, input: String) {
         webSocketManager?.sendChatInput(conversationId, input: input)
+    }
+
+    /// Send question answer from AskUserQuestion tool
+    func sendQuestionAnswer(_ conversationId: String, toolUseId: String, answers: [String: [String]]) {
+        webSocketManager?.sendChatQuestionAnswer(conversationId, toolUseId: toolUseId, answers: answers)
     }
 
     // MARK: - Helpers

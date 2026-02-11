@@ -8,6 +8,7 @@ struct ChatMessageView: View {
     var respondedApprovalIds: Set<String> = []
     var onApproval: ((String, Bool) -> Void)?
     var onInput: ((String, String) -> Void)?
+    var onQuestionAnswer: ((String, [String: [String]]) -> Void)?
     var onFileReference: ((String, Int?) -> Void)?
 
     /// Groups consecutive approval request blocks together
@@ -79,6 +80,7 @@ struct ChatMessageView: View {
                                 respondedApprovalIds: respondedApprovalIds,
                                 onApproval: onApproval,
                                 onInput: onInput,
+                                onQuestionAnswer: onQuestionAnswer,
                                 onFileReference: onFileReference
                             )
                             // Force view update when block content or status changes
@@ -137,6 +139,7 @@ struct ContentBlockView: View {
     var respondedApprovalIds: Set<String> = []
     var onApproval: ((String, Bool) -> Void)?
     var onInput: ((String, String) -> Void)?
+    var onQuestionAnswer: ((String, [String: [String]]) -> Void)?
     var onFileReference: ((String, Int?) -> Void)?
 
     /// Find the result block for a tool use start block
@@ -174,6 +177,12 @@ struct ContentBlockView: View {
         case .inputRequest:
             inputBlockView
 
+        case .questionPrompt:
+            questionBlockView
+
+        case .questionAnswered:
+            EmptyView()
+
         case .error:
             errorBlockView
 
@@ -191,6 +200,9 @@ struct ContentBlockView: View {
 
         case .topicUpdated:
             EmptyView()
+
+        case .image:
+            ImageBlockView(block: block)
         }
     }
 
@@ -375,6 +387,21 @@ struct ContentBlockView: View {
             block: block,
             onSubmit: { input in
                 onInput?(block.id, input)
+            }
+        )
+    }
+
+    private var questionBlockView: some View {
+        let hasResponded = respondedApprovalIds.contains(block.id)
+
+        return QuestionBlockView(
+            block: block,
+            hasResponded: hasResponded,
+            onSubmit: { answers in
+                // Use dedicated question answer callback
+                if let toolId = block.toolId {
+                    onQuestionAnswer?(toolId, answers)
+                }
             }
         )
     }

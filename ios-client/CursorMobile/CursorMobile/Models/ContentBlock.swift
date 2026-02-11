@@ -1,6 +1,24 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Question Data
+
+/// Question option for AskUserQuestion prompts
+struct QuestionOption: Codable, Identifiable, Hashable {
+    var id: String { label }
+    let label: String
+    let description: String
+}
+
+/// Question data for AskUserQuestion prompts
+struct QuestionData: Codable, Identifiable, Hashable {
+    var id: String { question }
+    let question: String
+    let header: String
+    let options: [QuestionOption]
+    let multiSelect: Bool
+}
+
 // MARK: - Content Block Types
 
 /// Types of content blocks that can be received from the CLI output parser
@@ -15,6 +33,8 @@ enum ContentBlockType: String, Codable, CaseIterable {
     case commandOutput = "command_output"
     case approvalRequest = "approval_request"
     case inputRequest = "input_request"
+    case questionPrompt = "question_prompt"
+    case questionAnswered = "question_answered"
     case error = "error"
     case progress = "progress"
     case codeBlock = "code_block"
@@ -23,6 +43,7 @@ enum ContentBlockType: String, Codable, CaseIterable {
     case sessionEnd = "session_end"
     case usage = "usage"
     case topicUpdated = "topic_updated"
+    case image = "image"
     
     /// Icon for this block type
     var icon: String {
@@ -37,6 +58,8 @@ enum ContentBlockType: String, Codable, CaseIterable {
         case .commandOutput: return "text.append"
         case .approvalRequest: return "hand.raised"
         case .inputRequest: return "keyboard"
+        case .questionPrompt: return "questionmark.circle"
+        case .questionAnswered: return "checkmark.circle"
         case .error: return "exclamationmark.triangle"
         case .progress: return "arrow.triangle.2.circlepath"
         case .codeBlock: return "chevron.left.forwardslash.chevron.right"
@@ -45,6 +68,7 @@ enum ContentBlockType: String, Codable, CaseIterable {
         case .sessionEnd: return "stop.circle"
         case .usage: return "chart.bar"
         case .topicUpdated: return "tag"
+        case .image: return "photo"
         }
     }
     
@@ -61,6 +85,8 @@ enum ContentBlockType: String, Codable, CaseIterable {
         case .commandOutput: return .secondary
         case .approvalRequest: return .yellow
         case .inputRequest: return .mint
+        case .questionPrompt: return .blue
+        case .questionAnswered: return .green
         case .error: return .red
         case .progress: return .blue
         case .codeBlock: return .secondary
@@ -69,6 +95,7 @@ enum ContentBlockType: String, Codable, CaseIterable {
         case .sessionEnd: return .gray
         case .usage: return .purple
         case .topicUpdated: return .blue
+        case .image: return .blue
         }
     }
 }
@@ -103,6 +130,10 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
     var action: String?
     var prompt: String?
     var options: [String]?
+
+    // Question prompt fields (AskUserQuestion tool)
+    var questions: [QuestionData]?
+    var answers: [String: [String]]?  // Map of questionID to selected answer(s)
     
     // Code block fields
     var language: String?
@@ -128,19 +159,29 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
     
     // Topic update fields
     var topic: String?
-    
+
+    // Image fields
+    var imageData: String?  // Base64 encoded image data
+    var mimeType: String?
+
+    // Persistence fields (from database)
+    var conversationId: String?
+
     enum CodingKeys: String, CodingKey {
         case id, type, timestamp, content, isPartial
         case toolId, toolName, input, isError
         case path, diff
         case command, exitCode
         case action, prompt, options
+        case questions, answers
         case language, code
         case message, errorCode
         case model, role, reason, suspended
         case inputTokens, outputTokens
         case isSuccess, isMode
         case topic
+        case imageData, mimeType
+        case conversationId
     }
 
     // MARK: - Initializers
@@ -162,6 +203,8 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
         action: String? = nil,
         prompt: String? = nil,
         options: [String]? = nil,
+        questions: [QuestionData]? = nil,
+        answers: [String: [String]]? = nil,
         language: String? = nil,
         code: String? = nil,
         message: String? = nil,
@@ -174,7 +217,10 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
         outputTokens: Int? = nil,
         isSuccess: Bool? = nil,
         isMode: Bool? = nil,
-        topic: String? = nil
+        topic: String? = nil,
+        imageData: String? = nil,
+        mimeType: String? = nil,
+        conversationId: String? = nil
     ) {
         self.id = id
         self.type = type
@@ -192,6 +238,8 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
         self.action = action
         self.prompt = prompt
         self.options = options
+        self.questions = questions
+        self.answers = answers
         self.language = language
         self.code = code
         self.message = message
@@ -205,6 +253,9 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
         self.isSuccess = isSuccess
         self.isMode = isMode
         self.topic = topic
+        self.imageData = imageData
+        self.mimeType = mimeType
+        self.conversationId = conversationId
     }
     
     // MARK: - Convenience Properties
@@ -230,6 +281,11 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
             return prompt ?? "Awaiting approval"
         case .inputRequest:
             return prompt ?? "Awaiting input"
+        case .questionPrompt:
+            let count = questions?.count ?? 0
+            return count == 1 ? "Question awaiting answer" : "\(count) questions awaiting answers"
+        case .questionAnswered:
+            return "Questions answered"
         case .error:
             return message ?? content ?? "Error"
         case .progress:
@@ -244,6 +300,8 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
             return "Tokens: \(inputTokens ?? 0) in / \(outputTokens ?? 0) out"
         case .topicUpdated:
             return "Topic: \(topic ?? "")"
+        case .image:
+            return "[Image]"
         }
     }
     
@@ -260,7 +318,7 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
     /// Whether this block is interactive (has buttons)
     var isInteractive: Bool {
         switch type {
-        case .approvalRequest, .inputRequest:
+        case .approvalRequest, .inputRequest, .questionPrompt:
             return true
         default:
             return false
@@ -291,6 +349,8 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
             action: action,
             prompt: prompt,
             options: options,
+            questions: questions,
+            answers: answers,
             language: language,
             code: code,
             message: message,
@@ -351,17 +411,45 @@ struct ChatContentBlock: Codable, Identifiable, Hashable {
         
         switch toolName.lowercased() {
         case "read", "read_file":
-            let filePath = inputDict["path"]?.stringValue ?? path ?? ""
+            // Try both "file_path" and "path" keys
+            let filePath = inputDict["file_path"]?.stringValue ?? inputDict["path"]?.stringValue ?? path ?? ""
             let fileName = (filePath as NSString).lastPathComponent
-            return ("doc.text", "Read File", fileName.isEmpty ? "Reading file" : fileName)
+
+            // Build description with filename and optional line range
+            var description = fileName.isEmpty ? "Reading file" : fileName
+
+            // Extract offset and limit from input dictionary
+            // Convert to Int if they're strings
+            let offsetStr = inputDict["offset"]?.stringValue
+            let limitStr = inputDict["limit"]?.stringValue
+            let offsetValue = offsetStr.flatMap { Int($0) }
+            let limitValue = limitStr.flatMap { Int($0) }
+
+            // Add line range if offset/limit are present
+            if let offset = offsetValue, let limit = limitValue {
+                let startLine = offset + 1  // Convert 0-based offset to 1-based line number
+                let endLine = offset + limit
+                description += " (lines \(startLine)-\(endLine))"
+            } else if let limit = limitValue {
+                // Limit without offset means reading from the start
+                description += " (lines 1-\(limit))"
+            } else if let offset = offsetValue {
+                // Offset without limit means reading from offset to end
+                let startLine = offset + 1
+                description += " (from line \(startLine))"
+            }
+
+            return ("doc.text", "Read File", description)
             
         case "write", "write_file":
-            let filePath = inputDict["path"]?.stringValue ?? path ?? ""
+            // Try both "file_path" and "path" keys
+            let filePath = inputDict["file_path"]?.stringValue ?? inputDict["path"]?.stringValue ?? path ?? ""
             let fileName = (filePath as NSString).lastPathComponent
             return ("pencil", "Write File", fileName.isEmpty ? "Writing file" : fileName)
-            
+
         case "edit", "str_replace", "strreplace":
-            let filePath = inputDict["path"]?.stringValue ?? path ?? ""
+            // Try both "file_path" and "path" keys
+            let filePath = inputDict["file_path"]?.stringValue ?? inputDict["path"]?.stringValue ?? path ?? ""
             let fileName = (filePath as NSString).lastPathComponent
             return ("pencil.line", "Edit File", fileName.isEmpty ? "Editing file" : fileName)
             

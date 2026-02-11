@@ -1,4 +1,7 @@
 import { Router } from "express";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
 import { chatProcessManager } from "../utils/ChatProcessManager.js";
 import { ChatPersistenceStore } from "../utils/ChatPersistenceStore.js";
 import { ProjectManager } from "../utils/ProjectManager.js";
@@ -11,6 +14,34 @@ import { logger } from "../utils/LogManager.js";
 const router = Router();
 let projectManager;
 const persistenceStore = ChatPersistenceStore.getInstance();
+
+// Configure multer for file uploads
+const storage = multer.memoryStorage(); // Store files in memory as buffers
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit per file
+    files: 5, // Max 5 files per request
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept images and common document types
+    const allowedMimes = [
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'application/pdf',
+      'text/plain',
+      'text/csv',
+      'application/json',
+    ];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type ${file.mimetype} not allowed`));
+    }
+  },
+});
 
 // Initialize projectManager with dataDir from app locals
 router.use((req, res, next) => {
@@ -484,6 +515,63 @@ router.post("/:conversationId/fork", async (req, res) => {
     console.error("Error forking chat:", error);
     res.status(500).json({
       error: "Failed to fork chat",
+      details: error.message,
+    });
+  }
+});
+
+// Upload files for a conversation (images, documents)
+router.post("/:conversationId/upload", upload.array("files", 5), async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: "No files uploaded" });
+    }
+
+    // Check if conversation exists
+    const chatInfo = chatProcessManager.getChat(conversationId);
+    const persistedChat = await persistenceStore.getConversation(conversationId);
+
+    if (!chatInfo && !persistedChat) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
+
+    // Convert uploaded files to base64 and prepare attachment metadata
+    const attachments = req.files.map((file) => {
+      const base64Data = file.buffer.toString("base64");
+      return {
+        id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+        base64Data,
+      };
+    });
+
+    logger.info("Chat", "Files uploaded", {
+      conversationId,
+      fileCount: attachments.length,
+      totalSize: attachments.reduce((sum, a) => sum + a.size, 0),
+    });
+
+    res.json({
+      success: true,
+      conversationId,
+      attachments: attachments.map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+      })),
+    });
+  } catch (error) {
+    logger.error("Chat", "Failed to upload files", {
+      errorMessage: error.message,
+    });
+    console.error("Error uploading files:", error);
+    res.status(500).json({
+      error: "Failed to upload files",
       details: error.message,
     });
   }

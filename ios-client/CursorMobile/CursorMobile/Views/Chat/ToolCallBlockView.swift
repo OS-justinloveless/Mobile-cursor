@@ -139,9 +139,26 @@ struct ToolCallBlockView: View {
 
     private var expandedContentView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Tool Input Parameters
-            if !parsedInput.isEmpty {
-                inputParametersSection
+            // Special handling for Edit tool - show diff view
+            if block.toolName?.lowercased() == "edit" || block.toolName?.lowercased() == "str_replace" {
+                if let oldString = parsedInput["old_string"],
+                   let newString = parsedInput["new_string"] {
+                    EditDiffView(
+                        oldString: oldString,
+                        newString: newString,
+                        filePath: parsedInput["file_path"]
+                    )
+                } else {
+                    // Fallback to regular input display if we can't find old/new strings
+                    if !parsedInput.isEmpty {
+                        inputParametersSection
+                    }
+                }
+            } else {
+                // Tool Input Parameters for non-Edit tools
+                if !parsedInput.isEmpty {
+                    inputParametersSection
+                }
             }
 
             // Tool Result

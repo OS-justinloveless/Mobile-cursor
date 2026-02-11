@@ -18,6 +18,7 @@ struct ChatSessionView: View {
 
     // Input state
     @State private var inputText = ""
+    @State private var attachments: [SelectedMedia] = []
     @State private var selectedMode: ChatMode = .agent
     @State private var selectedModel: AIModel?
 
@@ -56,7 +57,8 @@ struct ChatSessionView: View {
                 isStreaming: isStreaming,
                 onSend: sendMessage,
                 onCancel: cancelChat,
-                projectId: project.id
+                projectId: project.id,
+                attachments: $attachments
             )
         }
         .navigationTitle(chatTopic.isEmpty ? chat.displayTitle : chatTopic)
@@ -171,6 +173,9 @@ struct ChatSessionView: View {
                             },
                             onInput: { blockId, input in
                                 sendInput(input: input)
+                            },
+                            onQuestionAnswer: { toolUseId, answers in
+                                sendQuestionAnswer(toolUseId: toolUseId, answers: answers)
                             },
                             onFileReference: { path, line in
                                 // TODO: Open file viewer
@@ -499,29 +504,45 @@ struct ChatSessionView: View {
 
     private func sendMessage() {
         let content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty else { return }
+        guard !content.isEmpty || !attachments.isEmpty else { return }
 
-        print("[ChatSessionView] Sending message to \(chat.effectiveTerminalId): \(content.prefix(50))...")
+        print("[ChatSessionView] Sending message to \(chat.effectiveTerminalId): \(content.prefix(50))... with \(attachments.count) attachment(s)")
 
         // Add user message to list
+        var blocks: [ChatContentBlock] = []
+
+        // Add text content if present
+        if !content.isEmpty {
+            blocks.append(ChatContentBlock(
+                id: UUID().uuidString,
+                type: .text,
+                timestamp: Date().timeIntervalSince1970,
+                content: content
+            ))
+        }
+
+        // Add image blocks
+        for attachment in attachments {
+            if case .image(let selectedImage) = attachment,
+               let base64Data = selectedImage.toBase64() {
+                blocks.append(ChatContentBlock(
+                    id: UUID().uuidString,
+                    type: .image,
+                    timestamp: Date().timeIntervalSince1970,
+                    imageData: base64Data,
+                    mimeType: "image/jpeg"
+                ))
+            }
+        }
+
         let userMessage = ParsedMessage(
             id: UUID().uuidString,
             role: .user,
-            blocks: [
-                ChatContentBlock(
-                    id: UUID().uuidString,
-                    type: .text,
-                    timestamp: Date().timeIntervalSince1970,
-                    content: content
-                )
-            ],
+            blocks: blocks,
             timestamp: Date(),
             isStreaming: false
         )
         messages.append(userMessage)
-
-        // Clear input
-        inputText = ""
 
         // Build message with optional model flag
         var messageContent = content
@@ -529,12 +550,36 @@ struct ChatSessionView: View {
             messageContent = "--model \(model.id) \(content)"
         }
 
-        // Send via WebSocket with mode
+        // Convert attachments to JSON format
+        var attachmentDicts: [[String: Any]]? = nil
+        if !attachments.isEmpty {
+            attachmentDicts = attachments.compactMap { media in
+                switch media {
+                case .image(let selectedImage):
+                    guard let base64Data = selectedImage.toBase64() else { return nil }
+                    return [
+                        "mimeType": "image/jpeg",
+                        "base64Data": base64Data,
+                        "filename": "image.jpg",
+                        "size": selectedImage.estimatedSize
+                    ]
+                case .video:
+                    return nil // Videos not supported yet
+                }
+            }
+        }
+
+        // Clear input and attachments
+        inputText = ""
+        attachments = []
+
+        // Send via WebSocket with mode and attachments
         chatManager.sendMessage(
             chat.effectiveTerminalId,
             content: messageContent,
             workspaceId: project.id,
-            mode: selectedMode.rawValue
+            mode: selectedMode.rawValue,
+            attachments: attachmentDicts
         )
 
         scrollToBottom = true
@@ -553,6 +598,13 @@ struct ChatSessionView: View {
 
     private func sendInput(input: String) {
         chatManager.sendInput(chat.effectiveTerminalId, input: input)
+    }
+
+    private func sendQuestionAnswer(toolUseId: String, answers: [String: [String]]) {
+        // Track that this question has been responded to
+        respondedApprovalIds.insert(toolUseId)
+        chatManager.sendQuestionAnswer(chat.effectiveTerminalId, toolUseId: toolUseId, answers: answers)
+        print("[ChatSessionView] Sent question answer for tool \(toolUseId)")
     }
 
     private func saveTopicChange() {

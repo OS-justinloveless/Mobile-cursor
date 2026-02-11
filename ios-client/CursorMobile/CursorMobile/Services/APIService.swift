@@ -1049,6 +1049,61 @@ class APIService {
         }
     }
 
+    /// Upload files to a conversation (images, documents)
+    /// - Parameters:
+    ///   - conversationId: The conversation ID to upload files to
+    ///   - files: Array of tuples containing (data, filename, mimeType)
+    /// - Returns: Response with uploaded file info
+    func uploadFiles(conversationId: String, files: [(data: Data, filename: String, mimeType: String)]) async throws -> ChatUploadFilesResponse {
+        logAsync(.info, "API", "Uploading files to conversation", data: ["conversationId": conversationId, "fileCount": files.count])
+
+        let encodedId = conversationId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? conversationId
+        let boundary = "Boundary-\(UUID().uuidString)"
+
+        var bodyData = Data()
+
+        // Add each file to multipart form data
+        for (fileData, filename, mimeType) in files {
+            bodyData.append("--\(boundary)\r\n".data(using: .utf8)!)
+            bodyData.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+            bodyData.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+            bodyData.append(fileData)
+            bodyData.append("\r\n".data(using: .utf8)!)
+        }
+
+        bodyData.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        // Create URL
+        guard let url = URL(string: "\(serverUrl)/api/conversations/\(encodedId)/upload") else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        do {
+            let (data, response) = try await session.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.invalidResponse
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                throw APIError.httpError(httpResponse.statusCode)
+            }
+
+            let uploadResponse = try decoder.decode(ChatUploadFilesResponse.self, from: data)
+            logAsync(.info, "API", "Files uploaded successfully", data: ["attachmentCount": uploadResponse.attachments.count])
+            return uploadResponse
+        } catch {
+            logAsync(.error, "API", "Failed to upload files", data: ["error": error.localizedDescription])
+            throw error
+        }
+    }
+
     /// Legacy method - redirects to createChatWindow
     @available(*, deprecated, message: "Use createChatWindow instead")
     func createConversation(workspaceId: String? = nil, model: String? = nil, mode: ChatMode? = nil, tool: String = "cursor-agent") async throws -> String {

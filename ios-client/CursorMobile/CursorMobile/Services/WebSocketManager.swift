@@ -553,7 +553,7 @@ class WebSocketManager: ObservableObject {
     }
     
     /// Send a message to a chat conversation
-    func sendChatMessage(_ conversationId: String, content: String, workspaceId: String? = nil, mode: String? = nil) {
+    func sendChatMessage(_ conversationId: String, content: String, workspaceId: String? = nil, mode: String? = nil, attachments: [[String: Any]]? = nil) {
         var message: [String: Any] = [
             "type": "chatMessage",
             "conversationId": conversationId,
@@ -565,7 +565,11 @@ class WebSocketManager: ObservableObject {
         if let mode = mode {
             message["mode"] = mode
         }
-        print("WebSocket: Sending chatMessage: \(message)")
+        if let attachments = attachments {
+            message["attachments"] = attachments
+        }
+        let attachmentCount = attachments?.count ?? 0
+        print("WebSocket: Sending chatMessage with \(attachmentCount) attachment(s)")
         send(message)
         print("WebSocket: Sent chat message to \(conversationId)")
     }
@@ -600,5 +604,16 @@ class WebSocketManager: ObservableObject {
             "conversationId": conversationId,
             "content": input
         ])
+    }
+
+    /// Send question answer from AskUserQuestion tool
+    func sendChatQuestionAnswer(_ conversationId: String, toolUseId: String, answers: [String: [String]]) {
+        send([
+            "type": "chatQuestionAnswer",
+            "conversationId": conversationId,
+            "toolUseId": toolUseId,
+            "answers": answers
+        ])
+        print("WebSocket: Sending chatQuestionAnswer for tool \(toolUseId) in \(conversationId)")
     }
 }

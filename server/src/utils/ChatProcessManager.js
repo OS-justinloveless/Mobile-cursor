@@ -576,7 +576,32 @@ class ChatProcessManager extends EventEmitter {
         return null;
 
       case 'tool_use':
-        // Tool use event
+        // Check if this is an AskUserQuestion tool - transform to question_prompt event
+        if (cliEvent.name === 'AskUserQuestion') {
+          console.log(`[ChatProcessManager] ASKUSERQUESTION TOOL USE:`, JSON.stringify(cliEvent, null, 2));
+
+          // Extract questions array from tool input
+          const questions = cliEvent.input?.questions || [];
+
+          // Transform each question into our format
+          const formattedQuestions = questions.map(q => ({
+            question: q.question,
+            header: q.header,
+            options: q.options || [],
+            multiSelect: q.multiSelect || false,
+          }));
+
+          return {
+            id: cliEvent.id || id,
+            type: 'question_prompt',
+            conversationId,
+            toolId: cliEvent.id,
+            questions: formattedQuestions,
+            timestamp,
+          };
+        }
+
+        // Regular tool use event
         return {
           id: cliEvent.id || id,
           type: 'tool_use_start',
@@ -952,24 +977,128 @@ class ChatProcessManager extends EventEmitter {
   /**
    * Generate a short topic string from a user message.
    * Used to auto-set the topic on the first user message.
+   * Uses the configured CLI agent (claude, cursor-agent, etc.) to generate a concise 2-3 word topic.
    */
-  generateTopicFromMessage(message) {
-    // Clean up the message: collapse whitespace, trim
-    let topic = message.replace(/\s+/g, ' ').trim();
+  async generateTopicFromMessage(message, tool = 'claude') {
+    try {
+      // Get CLI adapter and executable path
+      const adapter = getCLIAdapter(tool);
+      if (!adapter) {
+        console.log(`[ChatProcessManager] No adapter found for tool: ${tool}, using fallback`);
+        return this.fallbackTopicGeneration(message);
+      }
 
-    // Remove leading/trailing quotes if the whole message is quoted
+      const cliPath = adapter.getExecutable();
+      if (!cliPath) {
+        console.log(`[ChatProcessManager] CLI not found for tool: ${tool}, using fallback`);
+        return this.fallbackTopicGeneration(message);
+      }
+
+      // Spawn a quick CLI process to generate the topic
+      const prompt = `Generate a very short (2-3 words) topic title for this message. Only respond with the topic title, nothing else:\n\n${message.substring(0, 500)}`;
+
+      // Use --print with the prompt as an argument for non-interactive execution
+      const args = ['--print', '--model', 'haiku', prompt];
+
+      console.log(`[ChatProcessManager] Generating topic using ${tool} CLI`);
+
+      const result = await new Promise((resolve, reject) => {
+        let resolved = false;
+        const childProcess = spawn(cliPath, args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        childProcess.stdout.on('data', (data) => {
+          stdout += data.toString();
+        });
+
+        childProcess.stderr.on('data', (data) => {
+          stderr += data.toString();
+        });
+
+        childProcess.on('close', (code) => {
+          if (resolved) return;
+          resolved = true;
+
+          if (code === 0) {
+            resolve(stdout);
+          } else {
+            reject(new Error(`CLI exited with code ${code}: ${stderr}`));
+          }
+        });
+
+        childProcess.on('error', (err) => {
+          if (resolved) return;
+          resolved = true;
+          reject(err);
+        });
+
+        // Timeout after 15 seconds
+        const timeout = setTimeout(() => {
+          if (resolved) return;
+          resolved = true;
+          childProcess.kill('SIGTERM');
+          reject(new Error('Topic generation timeout'));
+        }, 15000);
+
+        // Clear timeout if process completes
+        childProcess.on('close', () => clearTimeout(timeout));
+      });
+
+      // Extract the topic from the response
+      let topic = result.trim();
+
+      // Clean up markdown formatting if present
+      topic = topic.replace(/^#+\s*/, ''); // Remove markdown headers
+      topic = topic.replace(/\*\*/g, ''); // Remove bold markers
+      topic = topic.replace(/\n.*$/s, ''); // Take only first line
+
+      // Clean up quotes if AI added them
+      if ((topic.startsWith('"') && topic.endsWith('"')) ||
+          (topic.startsWith("'") && topic.endsWith("'"))) {
+        topic = topic.slice(1, -1).trim();
+      }
+
+      // Ensure it's not too long (max 50 chars)
+      if (topic.length > 50) {
+        const truncated = topic.substring(0, 47);
+        const lastSpace = truncated.lastIndexOf(' ');
+        topic = lastSpace > 20 ? truncated.substring(0, lastSpace) + '...' : truncated + '...';
+      }
+
+      // If the result is empty or too short, fall back
+      if (!topic || topic.length < 2) {
+        console.log(`[ChatProcessManager] Generated topic too short, using fallback`);
+        return this.fallbackTopicGeneration(message);
+      }
+
+      console.log(`[ChatProcessManager] AI-generated topic: "${topic}" from message: "${message.substring(0, 50)}..."`);
+      return topic;
+    } catch (error) {
+      console.error(`[ChatProcessManager] Failed to generate AI topic, falling back to truncation:`, error.message);
+      return this.fallbackTopicGeneration(message);
+    }
+  }
+
+  /**
+   * Fallback topic generation when AI is not available
+   */
+  fallbackTopicGeneration(message) {
+    // Fallback: truncate the message
+    let topic = message.replace(/\s+/g, ' ').trim();
     if ((topic.startsWith('"') && topic.endsWith('"')) ||
         (topic.startsWith("'") && topic.endsWith("'"))) {
       topic = topic.slice(1, -1).trim();
     }
 
     const maxLength = 60;
-
     if (topic.length <= maxLength) {
       return topic;
     }
 
-    // Truncate at word boundary
     const truncated = topic.substring(0, maxLength);
     const lastSpace = truncated.lastIndexOf(' ');
     if (lastSpace > maxLength * 0.4) {
@@ -981,8 +1110,11 @@ class ChatProcessManager extends EventEmitter {
 
   /**
    * Send a message to the chat
+   * @param {string} conversationId - The conversation ID
+   * @param {string|object} content - Text content or message object with attachments
+   * @param {Array} [attachments] - Optional array of attachment objects with {mimeType, base64Data, filename}
    */
-  async sendMessage(conversationId, content) {
+  async sendMessage(conversationId, content, attachments = null) {
     const chatInfo = this.processes.get(conversationId);
     if (!chatInfo) {
       throw new Error(`Chat not found: ${conversationId}`);
@@ -992,7 +1124,8 @@ class ChatProcessManager extends EventEmitter {
       throw new Error(`Chat process not running: ${conversationId}`);
     }
 
-    console.log(`[ChatProcessManager] Sending message to ${conversationId}: ${content.substring(0, 50)}...`);
+    const textContent = typeof content === 'string' ? content : content.text || '';
+    console.log(`[ChatProcessManager] Sending message to ${conversationId}: ${textContent.substring(0, 50)}...`);
 
     // End replay phase -- user is sending a new message, so any subsequent
     // assistant/user events from the CLI are NEW, not replayed history
@@ -1004,27 +1137,58 @@ class ChatProcessManager extends EventEmitter {
     // Auto-generate topic from the first user message if topic is still the default
     const defaultTopicPattern = /^New \w+ chat$/;
     if (defaultTopicPattern.test(chatInfo.topic) && !chatInfo.topicAutoGenerated) {
-      const newTopic = this.generateTopicFromMessage(content);
-      if (newTopic) {
-        const oldTopic = chatInfo.topic;
-        chatInfo.topic = newTopic;
-        chatInfo.topicAutoGenerated = true;
+      // Generate topic asynchronously (don't await to avoid blocking message send)
+      this.generateTopicFromMessage(content, chatInfo.tool).then(newTopic => {
+        if (newTopic) {
+          const oldTopic = chatInfo.topic;
+          chatInfo.topic = newTopic;
+          chatInfo.topicAutoGenerated = true;
 
-        console.log(`[ChatProcessManager] Auto-generated topic for ${conversationId}: "${oldTopic}" -> "${newTopic}"`);
+          console.log(`[ChatProcessManager] Auto-generated topic for ${conversationId}: "${oldTopic}" -> "${newTopic}"`);
 
-        // Update in persistence store
-        this.persistenceStore.updateConversationTopic(conversationId, newTopic).catch(err => {
-          console.error(`[ChatProcessManager] Failed to update auto-generated topic:`, err);
-        });
+          // Update in persistence store
+          this.persistenceStore.updateConversationTopic(conversationId, newTopic).catch(err => {
+            console.error(`[ChatProcessManager] Failed to update auto-generated topic:`, err);
+          });
 
-        // Notify connected clients about the topic change
-        this.notifyHandlers(conversationId, {
-          id: `topic-updated-${Date.now()}`,
-          type: 'topic_updated',
-          conversationId,
-          topic: newTopic,
-          timestamp: Date.now(),
-        });
+          // Notify connected clients about the topic change
+          this.notifyHandlers(conversationId, {
+            id: `topic-updated-${Date.now()}`,
+            type: 'topic_updated',
+            conversationId,
+            topic: newTopic,
+            timestamp: Date.now(),
+          });
+        }
+      }).catch(err => {
+        console.error(`[ChatProcessManager] Error during topic generation:`, err);
+      });
+    }
+
+    // Build content array with text and optional attachments
+    const contentBlocks = [{ type: 'text', text: textContent }];
+
+    // Add image/document attachments if provided
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      for (const attachment of attachments) {
+        // Check if it's an image
+        if (attachment.mimeType && attachment.mimeType.startsWith('image/')) {
+          contentBlocks.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: attachment.mimeType,
+              data: attachment.base64Data
+            }
+          });
+          console.log(`[ChatProcessManager] Added image attachment: ${attachment.filename} (${attachment.mimeType})`);
+        } else {
+          // For non-image files, include them as text content blocks
+          // The CLI will handle them appropriately
+          const fileInfo = `[Attached file: ${attachment.filename} (${attachment.mimeType}, ${attachment.size} bytes)]`;
+          contentBlocks[0].text += `\n\n${fileInfo}`;
+          console.log(`[ChatProcessManager] Added file reference: ${attachment.filename}`);
+        }
       }
     }
 
@@ -1034,7 +1198,7 @@ class ChatProcessManager extends EventEmitter {
       type: 'user',
       message: {
         role: 'user',
-        content: [{ type: 'text', text: content }]
+        content: contentBlocks
       }
     });
 
@@ -1046,7 +1210,7 @@ class ChatProcessManager extends EventEmitter {
       type: 'text',
       role: 'user',
       conversationId,
-      content: content,
+      content: textContent,
       timestamp: Date.now(),
     });
 
@@ -1248,6 +1412,49 @@ class ChatProcessManager extends EventEmitter {
       console.error(`[ChatProcessManager] Error executing denied tool:`, err);
       return { success: false, error: err.message };
     }
+  }
+
+  /**
+   * Send question answer(s) back to the Claude CLI for AskUserQuestion tool
+   * @param {string} conversationId
+   * @param {string} toolUseId - The tool use ID from the question_prompt event
+   * @param {object} answers - Map of question IDs to selected answer(s)
+   */
+  async sendQuestionAnswer(conversationId, toolUseId, answers) {
+    const chatInfo = this.processes.get(conversationId);
+    if (!chatInfo) {
+      throw new Error(`Chat not found: ${conversationId}`);
+    }
+
+    if (!chatInfo.process || chatInfo.status !== 'running') {
+      throw new Error(`Chat process not running: ${conversationId}`);
+    }
+
+    console.log(`[ChatProcessManager] Sending question answer for tool ${toolUseId}:`, JSON.stringify(answers, null, 2));
+
+    // Send tool result back to CLI with the answers
+    // The CLI expects a tool_result message for the AskUserQuestion tool
+    const toolResult = JSON.stringify({
+      type: 'tool_result',
+      tool_use_id: toolUseId,
+      content: JSON.stringify({ answers }),
+    });
+
+    chatInfo.process.stdin.write(toolResult + '\n');
+
+    // Notify clients that the question was answered
+    const answerBlock = {
+      id: `question-answered-${Date.now()}`,
+      type: 'question_answered',
+      conversationId,
+      toolId: toolUseId,
+      answers,
+      timestamp: Date.now(),
+    };
+    this.bufferMessage(conversationId, answerBlock);
+    this.notifyHandlers(conversationId, answerBlock);
+
+    return { success: true };
   }
 
   /**

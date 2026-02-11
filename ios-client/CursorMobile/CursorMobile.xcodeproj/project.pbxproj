@@ -85,7 +85,10 @@
 		H000000000000005 /* ChatSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000005 /* ChatSessionView.swift */; };
 		H000000000000006 /* ChatInputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000006 /* ChatInputBar.swift */; };
 		H000000000000007 /* ChatMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000007 /* ChatMessageView.swift */; };
+		80FEE23DD1B147F2847588FF /* ImageBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC607533DD924B40A403169D /* ImageBlockView.swift */; };
 		H000000000000008 /* ToolCallBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000008 /* ToolCallBlockView.swift */; };
+		1496E4DFF53D45CF94E9EC37 /* QuestionBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F982F4BA6AF4AF0A8B60422 /* QuestionBlockView.swift */; };
+		F9542A1DAB4B44FD977171D4 /* EditDiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E633335547354B09A58E0B94 /* EditDiffView.swift */; };
 		H000000000000009 /* ChatMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H100000000000009 /* ChatMarkdownView.swift */; };
 		H00000000000000A /* ChatModePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000A /* ChatModePickerView.swift */; };
 		H00000000000000B /* NewChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = H10000000000000B /* NewChatSheet.swift */; };
@@ -173,7 +176,10 @@
 		H100000000000005 /* ChatSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionView.swift; sourceTree = "<group>"; };
 		H100000000000006 /* ChatInputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInputBar.swift; sourceTree = "<group>"; };
 		H100000000000007 /* ChatMessageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageView.swift; sourceTree = "<group>"; };
+		BC607533DD924B40A403169D /* ImageBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageBlockView.swift; sourceTree = "<group>"; };
 		H100000000000008 /* ToolCallBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCallBlockView.swift; sourceTree = "<group>"; };
+		7F982F4BA6AF4AF0A8B60422 /* QuestionBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionBlockView.swift; sourceTree = "<group>"; };
+		E633335547354B09A58E0B94 /* EditDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditDiffView.swift; sourceTree = "<group>"; };
 		H100000000000009 /* ChatMarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMarkdownView.swift; sourceTree = "<group>"; };
 		H10000000000000A /* ChatModePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModePickerView.swift; sourceTree = "<group>"; };
 		H10000000000000B /* NewChatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewChatSheet.swift; sourceTree = "<group>"; };
@@ -313,7 +319,10 @@
 				H100000000000005 /* ChatSessionView.swift */,
 				H100000000000006 /* ChatInputBar.swift */,
 				H100000000000007 /* ChatMessageView.swift */,
+				BC607533DD924B40A403169D /* ImageBlockView.swift */,
 				H100000000000008 /* ToolCallBlockView.swift */,
+				7F982F4BA6AF4AF0A8B60422 /* QuestionBlockView.swift */,
+				E633335547354B09A58E0B94 /* EditDiffView.swift */,
 				H100000000000009 /* ChatMarkdownView.swift */,
 				H10000000000000A /* ChatModePickerView.swift */,
 				H10000000000000B /* NewChatSheet.swift */,
@@ -554,7 +563,10 @@
 				H000000000000005 /* ChatSessionView.swift in Sources */,
 				H000000000000006 /* ChatInputBar.swift in Sources */,
 				H000000000000007 /* ChatMessageView.swift in Sources */,
+				80FEE23DD1B147F2847588FF /* ImageBlockView.swift in Sources */,
 				H000000000000008 /* ToolCallBlockView.swift in Sources */,
+				1496E4DFF53D45CF94E9EC37 /* QuestionBlockView.swift in Sources */,
+				F9542A1DAB4B44FD977171D4 /* EditDiffView.swift in Sources */,
 				H000000000000009 /* ChatMarkdownView.swift in Sources */,
 				H00000000000000A /* ChatModePickerView.swift in Sources */,
 				H00000000000000B /* NewChatSheet.swift in Sources */,
@@ -705,7 +717,7 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -738,7 +750,7 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

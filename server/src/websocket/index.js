@@ -118,6 +118,10 @@ export function setupWebSocket(wss, authManager) {
             handleChatApproval(clientId, ws, message);
             break;
 
+          case 'chatQuestionAnswer':
+            handleChatQuestionAnswer(clientId, ws, message);
+            break;
+
           default:
             ws.send(JSON.stringify({
               type: 'error',
@@ -1113,8 +1117,8 @@ function handleChatDetach(clientId, message) {
  * Send a message to a chat session
  */
 async function handleChatMessage(clientId, ws, message) {
-  console.log(`[WS] handleChatMessage called for client ${clientId}:`, JSON.stringify(message));
-  const { conversationId, content, mode } = message;
+  console.log(`[WS] handleChatMessage called for client ${clientId}:`, JSON.stringify(message, null, 2).substring(0, 500));
+  const { conversationId, content, mode, attachments } = message;
 
   if (!conversationId || content === undefined) {
     ws.send(JSON.stringify({
@@ -1141,16 +1145,20 @@ async function handleChatMessage(clientId, ws, message) {
       await chatProcessManager.switchMode(conversationId, mode);
     }
 
-    const result = await chatProcessManager.sendMessage(conversationId, content);
+    // Send message with optional attachments
+    const result = await chatProcessManager.sendMessage(conversationId, content, attachments);
 
     // Confirm message was sent
     ws.send(JSON.stringify({
       type: 'chatMessageSent',
       conversationId,
-      messageId: result.messageId
+      messageId: result.messageId,
+      hasAttachments: attachments && attachments.length > 0
     }));
 
-    console.log(`[WS] Sent message to chat ${conversationId}: ${content.substring(0, 50)}...`);
+    const displayContent = typeof content === 'string' ? content : content.text || '';
+    const attachmentInfo = attachments && attachments.length > 0 ? ` (${attachments.length} attachment${attachments.length > 1 ? 's' : ''})` : '';
+    console.log(`[WS] Sent message to chat ${conversationId}: ${displayContent.substring(0, 50)}...${attachmentInfo}`);
   } catch (error) {
     console.error(`[WS] Failed to send message to chat ${conversationId}:`, error);
     ws.send(JSON.stringify({
@@ -1180,6 +1188,33 @@ async function handleChatApproval(clientId, ws, message) {
     await chatProcessManager.sendApproval(conversationId, approved, blockId);
     console.log(`[WS] Sent approval (${approved}) for block ${blockId} to chat ${conversationId}`);
   } catch (error) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      conversationId,
+      message: error.message
+    }));
+  }
+}
+
+/**
+ * Handle question answer submission from AskUserQuestion tool
+ */
+async function handleChatQuestionAnswer(clientId, ws, message) {
+  const { conversationId, toolUseId, answers } = message;
+
+  if (!conversationId || !toolUseId || !answers) {
+    ws.send(JSON.stringify({
+      type: 'chatError',
+      message: 'conversationId, toolUseId, and answers are required'
+    }));
+    return;
+  }
+
+  try {
+    await chatProcessManager.sendQuestionAnswer(conversationId, toolUseId, answers);
+    console.log(`[WS] Sent question answer for tool ${toolUseId} to chat ${conversationId}`);
+  } catch (error) {
+    console.error(`[WS] Failed to send question answer:`, error);
     ws.send(JSON.stringify({
       type: 'chatError',
       conversationId,

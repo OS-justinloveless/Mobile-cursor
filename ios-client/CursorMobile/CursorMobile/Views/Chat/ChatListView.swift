@@ -97,61 +97,51 @@ struct ChatListView: View {
 
     private var chatsList: some View {
         List {
-            // Group chats by tool/agent
-            ForEach(groupedChats, id: \.key) { tool, chats in
-                Section {
-                    ForEach(chats) { chat in
-                        ChatRowView(chat: chat)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedChat = chat
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    chatToDelete = chat
-                                    showDeleteConfirmation = true
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                Button {
-                                    chatToManage = chat
-                                } label: {
-                                    Label("More", systemImage: "ellipsis.circle")
-                                }
-                                .tint(.blue)
-                            }
-                            .contextMenu {
-                                Button {
-                                    selectedChat = chat
-                                } label: {
-                                    Label("Open", systemImage: "bubble.left")
-                                }
-
-                                Button {
-                                    chatToManage = chat
-                                } label: {
-                                    Label("Manage", systemImage: "ellipsis.circle")
-                                }
-
-                                Divider()
-
-                                Button(role: .destructive) {
-                                    chatToDelete = chat
-                                    showDeleteConfirmation = true
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+            // Show chats chronologically
+            ForEach(sortedChats) { chat in
+                ChatRowView(chat: chat)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        selectedChat = chat
                     }
-                } header: {
-                    if let chatTool = ChatTool(rawValue: tool) {
-                        Label(chatTool.displayName, systemImage: chatTool.icon)
-                    } else {
-                        Label(tool.capitalized, systemImage: "cpu")
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            chatToDelete = chat
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
                     }
-                }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        Button {
+                            chatToManage = chat
+                        } label: {
+                            Label("More", systemImage: "ellipsis.circle")
+                        }
+                        .tint(.blue)
+                    }
+                    .contextMenu {
+                        Button {
+                            selectedChat = chat
+                        } label: {
+                            Label("Open", systemImage: "bubble.left")
+                        }
+
+                        Button {
+                            chatToManage = chat
+                        } label: {
+                            Label("Manage", systemImage: "ellipsis.circle")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            chatToDelete = chat
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
             }
         }
         .listStyle(.insetGrouped)
@@ -159,10 +149,13 @@ struct ChatListView: View {
 
     // MARK: - Helpers
 
-    /// Group chats by their tool/agent
-    private var groupedChats: [(key: String, value: [ChatWindow])] {
-        let grouped = Dictionary(grouping: chatManager.chats) { $0.tool }
-        return grouped.sorted { $0.key < $1.key }
+    /// Sort chats chronologically by timestamp (newest first)
+    private var sortedChats: [ChatWindow] {
+        chatManager.chats.sorted { chat1, chat2 in
+            let timestamp1 = chat1.timestamp ?? chat1.createdAt ?? 0
+            let timestamp2 = chat2.timestamp ?? chat2.createdAt ?? 0
+            return timestamp1 > timestamp2
+        }
     }
 
     private func deleteChat(_ chat: ChatWindow) {
@@ -186,20 +179,27 @@ struct ChatRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Agent icon
-            Image(systemName: chat.toolIcon)
-                .font(.title2)
-                .foregroundColor(toolColor)
-                .frame(width: 32, height: 32)
-                .background(toolColor.opacity(0.1))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Title
                 Text(chat.displayTitle)
                     .font(.body)
-                    .lineLimit(1)
+                    .lineLimit(2)
 
                 HStack(spacing: 8) {
+                    // Agent tag
+                    HStack(spacing: 4) {
+                        Image(systemName: chat.toolIcon)
+                            .font(.caption2)
+                        Text(agentDisplayName)
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(toolColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(toolColor.opacity(0.15))
+                    .cornerRadius(6)
+
                     if chat.isActive {
                         Text("Active")
                             .font(.caption2)
@@ -224,7 +224,7 @@ struct ChatRowView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
     }
 
     private var toolColor: Color {
@@ -233,6 +233,15 @@ struct ChatRowView: View {
         case "cursor-agent": return .blue
         case "gemini": return .orange
         default: return .secondary
+        }
+    }
+
+    private var agentDisplayName: String {
+        switch chat.tool.lowercased() {
+        case "claude": return "Claude"
+        case "cursor-agent": return "Cursor"
+        case "gemini": return "Gemini"
+        default: return chat.tool.capitalized
         }
     }
 

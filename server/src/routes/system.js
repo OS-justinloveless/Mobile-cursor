@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import os from 'os';
+import fs from 'fs';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import Anthropic from '@anthropic-ai/sdk';
 import { checkAllToolsAvailability } from '../utils/CLIAdapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -75,21 +77,242 @@ router.get('/tools-status', async (req, res) => {
 });
 
 // Get available AI models for chat
-// Returns a static list of known Claude model aliases and versions
+// Returns models from both Anthropic API and Claude settings (custom AWS Bedrock models)
 router.get('/models', async (req, res) => {
   try {
-    const models = [
-      { id: 'sonnet', name: 'Claude Sonnet (latest)', isDefault: true, isCurrent: true },
-      { id: 'opus', name: 'Claude Opus (latest)', isDefault: false, isCurrent: false },
-      { id: 'haiku', name: 'Claude Haiku (latest)', isDefault: false, isCurrent: false },
-    ];
+    let models = [];
+    let customBedrockModels = [];
+    let defaultModelId = null;
+    let usesBedrock = false;
 
-    res.json({ models, cached: false });
+    // Step 1: Try to read Claude Code settings file for custom Bedrock models
+    const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    try {
+      console.log('[System] Reading Claude settings from:', claudeSettingsPath);
+      const settingsContent = await fs.promises.readFile(claudeSettingsPath, 'utf8');
+      const settings = JSON.parse(settingsContent);
+      console.log('[System] Found Claude settings, env keys:', settings.env ? Object.keys(settings.env) : 'none');
+
+      // Extract model configurations from env variables
+      if (settings.env) {
+        const env = settings.env;
+        usesBedrock = env.CLAUDE_CODE_USE_BEDROCK === '1';
+
+        // Parse ANTHROPIC_MODEL (default model)
+        if (env.ANTHROPIC_MODEL) {
+          defaultModelId = env.ANTHROPIC_MODEL;
+          const parsedId = parseModelId(env.ANTHROPIC_MODEL);
+          customBedrockModels.push({
+            id: env.ANTHROPIC_MODEL,
+            name: formatModelName(parsedId, 'Sonnet'),
+            isDefault: true,
+            isCurrent: true,
+            isBedrock: env.ANTHROPIC_MODEL.startsWith('arn:aws:bedrock:')
+          });
+        }
+
+        // Parse ANTHROPIC_DEFAULT_HAIKU_MODEL
+        if (env.ANTHROPIC_DEFAULT_HAIKU_MODEL && env.ANTHROPIC_DEFAULT_HAIKU_MODEL !== env.ANTHROPIC_MODEL) {
+          const haikuModel = parseModelId(env.ANTHROPIC_DEFAULT_HAIKU_MODEL);
+          customBedrockModels.push({
+            id: env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+            name: formatModelName(haikuModel, 'Haiku'),
+            isDefault: false,
+            isCurrent: false,
+            isBedrock: env.ANTHROPIC_DEFAULT_HAIKU_MODEL.startsWith('arn:aws:bedrock:')
+          });
+        }
+
+        // Parse ANTHROPIC_DEFAULT_OPUS_MODEL if exists
+        if (env.ANTHROPIC_DEFAULT_OPUS_MODEL && env.ANTHROPIC_DEFAULT_OPUS_MODEL !== env.ANTHROPIC_MODEL) {
+          const opusModel = parseModelId(env.ANTHROPIC_DEFAULT_OPUS_MODEL);
+          customBedrockModels.push({
+            id: env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+            name: formatModelName(opusModel, 'Opus'),
+            isDefault: false,
+            isCurrent: false,
+            isBedrock: env.ANTHROPIC_DEFAULT_OPUS_MODEL.startsWith('arn:aws:bedrock:')
+          });
+        }
+      }
+    } catch (settingsError) {
+      console.log('[System] Could not read Claude settings:', settingsError.message);
+    }
+
+    // Step 2: Try to fetch models from Anthropic API
+    let apiModels = [];
+    try {
+      // Read API key from Claude config
+      const claudeConfigPath = path.join(os.homedir(), '.claude', '.claude.json');
+      let apiKey = null;
+
+      try {
+        const configContent = await fs.promises.readFile(claudeConfigPath, 'utf8');
+        const config = JSON.parse(configContent);
+        apiKey = config.apiKey || config.api_key;
+      } catch (configError) {
+        console.log('[System] Could not read Claude API key:', configError.message);
+      }
+
+      if (apiKey && !usesBedrock) {
+        // Only fetch from API if we have a key and not using Bedrock exclusively
+        const anthropic = new Anthropic({ apiKey });
+        const modelsList = await anthropic.models.list();
+
+        console.log('[System] Fetched models from Anthropic API:', modelsList.data?.length || 0);
+
+        if (modelsList.data && Array.isArray(modelsList.data)) {
+          apiModels = modelsList.data
+            .filter(m => m.type === 'model') // Only include actual models, not other types
+            .map(m => ({
+              id: m.id,
+              name: formatApiModelName(m.id, m.display_name),
+              isDefault: false,
+              isCurrent: false,
+              isBedrock: false,
+              createdAt: m.created_at
+            }));
+        }
+      }
+    } catch (apiError) {
+      console.log('[System] Could not fetch models from Anthropic API:', apiError.message);
+    }
+
+    // Step 3: Merge models - prioritize custom Bedrock models, then add API models
+    models = [...customBedrockModels];
+
+    // Add API models that aren't already in the list (by comparing model IDs)
+    const existingIds = new Set(customBedrockModels.map(m => {
+      // Normalize Bedrock ARN to base model ID for comparison
+      const parsed = parseModelId(m.id);
+      return parsed.replace(/^global\.anthropic\./, '');
+    }));
+
+    for (const apiModel of apiModels) {
+      const normalizedId = apiModel.id.replace(/^global\.anthropic\./, '');
+      if (!existingIds.has(normalizedId)) {
+        models.push(apiModel);
+      }
+    }
+
+    // Step 4: If we have no models at all, use static fallback
+    if (models.length === 0) {
+      models = [
+        { id: 'sonnet', name: 'Claude Sonnet (latest)', isDefault: true, isCurrent: true },
+        { id: 'opus', name: 'Claude Opus (latest)', isDefault: false, isCurrent: false },
+        { id: 'haiku', name: 'Claude Haiku (latest)', isDefault: false, isCurrent: false },
+      ];
+    }
+
+    res.json({
+      models,
+      cached: false,
+      usesBedrock,
+      source: customBedrockModels.length > 0 ? 'bedrock+api' : apiModels.length > 0 ? 'api' : 'fallback'
+    });
   } catch (error) {
     console.error('[System] Error fetching models:', error);
     res.status(500).json({ error: 'Failed to fetch models' });
   }
 });
+
+// Helper function to parse model ID from AWS ARN or model string
+function parseModelId(modelString) {
+  // If it's an AWS Bedrock ARN, extract the model name
+  // Format: arn:aws:bedrock:region:account:inference-profile/global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  if (modelString.startsWith('arn:aws:bedrock:')) {
+    const parts = modelString.split('/');
+    if (parts.length > 1) {
+      const profilePart = parts[1]; // e.g., "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      return profilePart.split(':')[0]; // Remove version suffix
+    }
+  }
+  return modelString;
+}
+
+// Helper function to format model name for display
+function formatModelName(modelId, defaultType = '') {
+  // Extract meaningful name from model ID
+  // Examples:
+  // - "global.anthropic.claude-sonnet-4-5-20250929-v1" -> "Claude Sonnet 4.5 (AWS Bedrock)"
+  // - "claude-sonnet-4-5-20250929" -> "Claude Sonnet 4.5"
+  // - "sonnet" -> "Claude Sonnet (latest)"
+
+  if (modelId.includes('bedrock') || modelId.includes('global.anthropic')) {
+    // It's a Bedrock model
+    const cleanId = modelId.replace(/^global\.anthropic\./, '').replace(/-v\d+$/, '');
+
+    if (cleanId.includes('sonnet')) {
+      const versionMatch = cleanId.match(/(\d+)-(\d+)/);
+      if (versionMatch) {
+        return `Claude Sonnet ${versionMatch[1]}.${versionMatch[2]} (AWS Bedrock)`;
+      }
+      return 'Claude Sonnet (AWS Bedrock)';
+    } else if (cleanId.includes('opus')) {
+      const versionMatch = cleanId.match(/(\d+)-(\d+)/);
+      if (versionMatch) {
+        return `Claude Opus ${versionMatch[1]}.${versionMatch[2]} (AWS Bedrock)`;
+      }
+      return 'Claude Opus (AWS Bedrock)';
+    } else if (cleanId.includes('haiku')) {
+      const versionMatch = cleanId.match(/(\d+)-(\d+)/);
+      if (versionMatch) {
+        return `Claude Haiku ${versionMatch[1]}.${versionMatch[2]} (AWS Bedrock)`;
+      }
+      return 'Claude Haiku (AWS Bedrock)';
+    }
+  }
+
+  // Standard model names
+  if (modelId === 'sonnet' || modelId.includes('sonnet')) {
+    return `Claude ${defaultType || 'Sonnet'} (latest)`;
+  } else if (modelId === 'opus' || modelId.includes('opus')) {
+    return `Claude ${defaultType || 'Opus'} (latest)`;
+  } else if (modelId === 'haiku' || modelId.includes('haiku')) {
+    return `Claude ${defaultType || 'Haiku'} (latest)`;
+  }
+
+  // Fallback: capitalize and clean up
+  return modelId
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Helper function to format API model names
+function formatApiModelName(modelId, displayName) {
+  // If we have a display name from the API, use it
+  if (displayName) {
+    return displayName;
+  }
+
+  // Extract version and model type from model ID
+  // Example: "claude-sonnet-4-5-20250929" -> "Claude Sonnet 4.5"
+  if (modelId.includes('sonnet')) {
+    const versionMatch = modelId.match(/(\d+)-(\d+)/);
+    if (versionMatch) {
+      return `Claude Sonnet ${versionMatch[1]}.${versionMatch[2]}`;
+    }
+    return 'Claude Sonnet';
+  } else if (modelId.includes('opus')) {
+    const versionMatch = modelId.match(/(\d+)-(\d+)/);
+    if (versionMatch) {
+      return `Claude Opus ${versionMatch[1]}.${versionMatch[2]}`;
+    }
+    return 'Claude Opus';
+  } else if (modelId.includes('haiku')) {
+    const versionMatch = modelId.match(/(\d+)-(\d+)/);
+    if (versionMatch) {
+      return `Claude Haiku ${versionMatch[1]}.${versionMatch[2]}`;
+    }
+    return 'Claude Haiku';
+  }
+
+  // Fallback: use model ID with some cleanup
+  return modelId
+    .replace(/^claude-/, 'Claude ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
 
 // Build and run iOS app via Xcode
 router.post('/ios-build-run', async (req, res) => {
