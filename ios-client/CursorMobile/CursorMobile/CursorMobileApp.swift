@@ -1,5 +1,4 @@
 import SwiftUI
-import BackgroundTasks
 
 @main
 struct CursorMobileApp: App {

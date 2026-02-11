@@ -1,21 +1,28 @@
 import Foundation
-import BackgroundTasks
 import UIKit
+
+#if !targetEnvironment(macCatalyst)
+import BackgroundTasks
+#endif
 
 /// Manages background tasks for polling the server for pending notifications
 /// when the app is suspended or killed.
 ///
-/// Uses two mechanisms:
+/// On iOS, uses two mechanisms:
 /// 1. UIApplication.beginBackgroundTask — extends execution ~30s after backgrounding
 /// 2. BGAppRefreshTask — iOS periodically wakes the app to poll the server
+///
+/// On Mac Catalyst, background tasks are not needed since the app stays running.
 @MainActor
 class BackgroundTaskManager: ObservableObject {
     static let shared = BackgroundTaskManager()
 
     static let backgroundTaskIdentifier = "com.lovelesslabstx.napptrapp.notification-check"
 
+    #if !targetEnvironment(macCatalyst)
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
     private var pollingTimer: Timer?
+    #endif
 
     private init() {}
 
@@ -23,6 +30,7 @@ class BackgroundTaskManager: ObservableObject {
 
     /// Call once at app launch to register the background task handler
     func registerBackgroundTasks() {
+        #if !targetEnvironment(macCatalyst)
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: Self.backgroundTaskIdentifier,
             using: nil
@@ -32,10 +40,14 @@ class BackgroundTaskManager: ObservableObject {
             }
         }
         print("[BackgroundTaskManager] Registered background task: \(Self.backgroundTaskIdentifier)")
+        #else
+        print("[BackgroundTaskManager] Background tasks not needed on Mac Catalyst")
+        #endif
     }
 
     /// Schedule the next background refresh
     func scheduleBackgroundRefresh() {
+        #if !targetEnvironment(macCatalyst)
         let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskIdentifier)
         // Request earliest: 1 minute from now (iOS will decide the actual time)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 60)
@@ -46,8 +58,10 @@ class BackgroundTaskManager: ObservableObject {
         } catch {
             print("[BackgroundTaskManager] Failed to schedule background refresh: \(error)")
         }
+        #endif
     }
 
+    #if !targetEnvironment(macCatalyst)
     /// Handle a background refresh task — poll the server for pending notifications
     private func handleBackgroundRefresh(task: BGAppRefreshTask) async {
         print("[BackgroundTaskManager] Background refresh task started")
@@ -66,11 +80,13 @@ class BackgroundTaskManager: ObservableObject {
         task.setTaskCompleted(success: success)
         print("[BackgroundTaskManager] Background refresh completed, success=\(success)")
     }
+    #endif
 
     // MARK: - Background Execution Extension
 
     /// Call when app enters background to extend execution time
     func beginBackgroundProcessing() {
+        #if !targetEnvironment(macCatalyst)
         guard backgroundTaskId == .invalid else {
             print("[BackgroundTaskManager] Background task already active")
             return
@@ -96,10 +112,12 @@ class BackgroundTaskManager: ObservableObject {
                 await self?.pollServerForNotifications()
             }
         }
+        #endif
     }
 
     /// Call when app returns to foreground
     func endBackgroundProcessing() {
+        #if !targetEnvironment(macCatalyst)
         pollingTimer?.invalidate()
         pollingTimer = nil
 
@@ -108,6 +126,7 @@ class BackgroundTaskManager: ObservableObject {
             backgroundTaskId = .invalid
             print("[BackgroundTaskManager] Background task ended")
         }
+        #endif
     }
 
     // MARK: - Server Polling

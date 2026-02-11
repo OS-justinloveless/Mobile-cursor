@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 
+#if !targetEnvironment(macCatalyst)
 struct QRScannerView: UIViewControllerRepresentable {
     let onCodeScanned: (String) -> Void
     
@@ -253,3 +254,4 @@ class ScannerOverlayView: UIView {
         }
     }
 }
+#endif

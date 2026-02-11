@@ -6,7 +6,9 @@ import AVFoundation
 struct ImagePickerButton: View {
     @Binding var selectedMedia: [SelectedMedia]
     @State private var showingMediaPicker = false
+    #if !targetEnvironment(macCatalyst)
     @State private var showingCamera = false
+    #endif
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var isLoading = false
     
@@ -25,11 +27,13 @@ struct ImagePickerButton: View {
                 Label("Photo & Video Library", systemImage: "photo.on.rectangle")
             }
             
+            #if !targetEnvironment(macCatalyst)
             Button {
                 showingCamera = true
             } label: {
                 Label("Take Photo", systemImage: "camera")
             }
+            #endif
         } label: {
             ZStack {
                 Image(systemName: selectedMedia.isEmpty ? "photo" : "photo.badge.plus")
@@ -53,11 +57,13 @@ struct ImagePickerButton: View {
         .onChange(of: photoPickerItems) { _, newItems in
             loadMedia(from: newItems)
         }
+        #if !targetEnvironment(macCatalyst)
         .fullScreenCover(isPresented: $showingCamera) {
             CameraPicker { image in
                 addImage(image)
             }
         }
+        #endif
     }
     
     private func loadMedia(from items: [PhotosPickerItem]) {
@@ -176,6 +182,7 @@ struct VideoTransferable: Transferable {
     }
 }
 
+#if !targetEnvironment(macCatalyst)
 /// Camera picker using UIImagePickerController
 struct CameraPicker: UIViewControllerRepresentable {
     let onImagePicked: (UIImage) -> Void
@@ -213,3 +220,4 @@ struct CameraPicker: UIViewControllerRepresentable {
         }
     }
 }
+#endif

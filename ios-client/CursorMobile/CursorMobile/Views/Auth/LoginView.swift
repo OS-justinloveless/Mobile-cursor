@@ -1,5 +1,7 @@
 import SwiftUI
+#if !targetEnvironment(macCatalyst)
 import AVFoundation
+#endif
 
 struct LoginView: View {
     @EnvironmentObject var authManager: AuthManager
@@ -7,7 +9,9 @@ struct LoginView: View {
     @State private var serverUrl = ""
     @State private var token = ""
     @State private var isConnecting = false
+    #if !targetEnvironment(macCatalyst)
     @State private var showScanner = false
+    #endif
     @State private var connectingHostId: UUID? = nil
     @State private var showSetupGuide = false
     
@@ -25,10 +29,17 @@ struct LoginView: View {
                             .font(.largeTitle)
                             .fontWeight(.bold)
                         
+                        #if targetEnvironment(macCatalyst)
+                        Text("Control your Cursor IDE from your desktop")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                        #else
                         Text("Control your Cursor IDE from your iPhone")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
+                        #endif
                     }
                     .padding(.top, 40)
                     
@@ -125,6 +136,7 @@ struct LoginView: View {
                         .padding(.horizontal)
                     }
                     
+                    #if !targetEnvironment(macCatalyst)
                     // QR Code Scanner Button
                     VStack(spacing: 12) {
                         Button {
@@ -160,6 +172,7 @@ struct LoginView: View {
                             .frame(height: 1)
                     }
                     .padding(.horizontal)
+                    #endif
                     
                     // Manual Entry Form
                     VStack(spacing: 16) {
@@ -265,12 +278,14 @@ struct LoginView: View {
                 }
             }
             .navigationBarHidden(true)
+            #if !targetEnvironment(macCatalyst)
             .sheet(isPresented: $showScanner) {
                 QRScannerView { result in
                     handleQRCode(result)
                     showScanner = false
                 }
             }
+            #endif
             .sheet(isPresented: $showSetupGuide) {
                 ServerSetupGuideSheet()
             }
@@ -610,10 +625,49 @@ struct SetupStep3View: View {
     var body: some View {
         SetupStepContainer(
             icon: "qrcode.viewfinder",
-            title: "Connect Your Phone",
+            title: "Connect",
             subtitle: "Link this app to your server"
         ) {
             VStack(alignment: .leading, spacing: 20) {
+                #if targetEnvironment(macCatalyst)
+                Text("Enter your server details to connect:")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Text("1")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.accentColor)
+                            .clipShape(Circle())
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Manual Entry")
+                                .font(.headline)
+                            Text("Enter the server address and auth token shown in your terminal under \"Manual Connection\". If the server is running on this machine, use http://localhost:3847.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                Divider()
+                
+                SetupNoteView(
+                    icon: "info.circle.fill",
+                    color: .blue,
+                    text: "If your server is running on this Mac, you can connect to localhost. For remote servers, ensure you're on the same network."
+                )
+                
+                SetupNoteView(
+                    icon: "checkmark.circle.fill",
+                    color: .green,
+                    text: "That's it! You're ready to control Cursor from your desktop."
+                )
+                #else
                 Text("You have two options to connect:")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -669,6 +723,7 @@ struct SetupStep3View: View {
                     color: .green,
                     text: "That's it! You're ready to control Cursor from your phone."
                 )
+                #endif
             }
         }
     }

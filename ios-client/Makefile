@@ -14,8 +14,9 @@ SIMULATOR_OS ?= 18.5
 # Build destinations
 SIMULATOR_DEST = platform=iOS Simulator,name=$(SIMULATOR),OS=$(SIMULATOR_OS)
 DEVICE_DEST = generic/platform=iOS
+MAC_DEST = platform=macOS,variant=Mac Catalyst
 
-.PHONY: all build build-release run clean install list-simulators list-devices help debug status screenshot logs crash-logs reinstall
+.PHONY: all build build-release build-mac run run-mac clean install list-simulators list-devices help debug status screenshot logs crash-logs reinstall
 
 # Default target
 all: build
@@ -41,6 +42,33 @@ build-release:
 		-destination '$(SIMULATOR_DEST)' \
 		-derivedDataPath $(DERIVED_DATA) \
 		build
+
+# Build for Mac (Mac Catalyst)
+build-mac:
+	@echo "Building $(SCHEME) for Mac (Catalyst)..."
+	xcodebuild \
+		-project $(PROJECT) \
+		-scheme $(SCHEME) \
+		-configuration $(CONFIGURATION) \
+		-destination '$(MAC_DEST)' \
+		-derivedDataPath $(DERIVED_DATA) \
+		build
+
+# Build for Mac (Mac Catalyst) release
+build-mac-release:
+	@echo "Building $(SCHEME) for Mac (Catalyst, Release)..."
+	xcodebuild \
+		-project $(PROJECT) \
+		-scheme $(SCHEME) \
+		-configuration Release \
+		-destination '$(MAC_DEST)' \
+		-derivedDataPath $(DERIVED_DATA) \
+		build
+
+# Run Mac Catalyst build
+run-mac: build-mac
+	@echo "Launching Mac Catalyst app..."
+	open "$(DERIVED_DATA)/Build/Products/$(CONFIGURATION)-maccatalyst/$(SCHEME).app"
 
 # Build for device (requires signing)
 build-device:
@@ -172,8 +200,11 @@ help:
 	@echo "Build Targets:"
 	@echo "  build            Build for simulator (debug)"
 	@echo "  build-release    Build for simulator (release)"
+	@echo "  build-mac        Build for Mac (Catalyst)"
+	@echo "  build-mac-release Build for Mac (Catalyst, release)"
 	@echo "  build-device     Build for physical device"
 	@echo "  run              Build and run on simulator"
+	@echo "  run-mac          Build and run Mac Catalyst app"
 	@echo "  run-fast         Run on already-booted simulator"
 	@echo "  clean            Clean build artifacts"
 	@echo "  test             Run unit tests"
