@@ -1485,14 +1485,23 @@ class ChatProcessManager extends EventEmitter {
     console.log(`[ChatProcessManager] Sending question answer for tool ${toolUseId}:`, JSON.stringify(answers, null, 2));
 
     // Send tool result back to CLI with the answers
-    // The CLI expects a tool_result message for the AskUserQuestion tool
-    const toolResult = JSON.stringify({
-      type: 'tool_result',
-      tool_use_id: toolUseId,
-      content: JSON.stringify({ answers }),
+    // The CLI expects a user message containing a tool_result content block
+    // This matches the format used in sendMessage() for consistency
+    const toolResultMessage = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: JSON.stringify({ answers }),
+          }
+        ]
+      }
     });
 
-    chatInfo.process.stdin.write(toolResult + '\n');
+    chatInfo.process.stdin.write(toolResultMessage + '\n');
 
     // Notify clients that the question was answered
     const answerBlock = {
