@@ -83,6 +83,14 @@ class AuthManager: ObservableObject {
                 serverUrl: normalizedUrl,
                 token: token
             )
+            
+            // If connected via Tailscale, update peer list for future discovery
+            if let urlHost = URL(string: normalizedUrl)?.host,
+               TailscaleManager.isTailscaleIP(urlHost) {
+                Task {
+                    await TailscaleManager.shared.updatePeerList(from: apiService)
+                }
+            }
         } catch let error as APIError {
             self.error = error.localizedDescription
         } catch {

@@ -136,12 +136,59 @@ func GetLocalIP() string {
 				ip = v.IP
 			}
 
-			// Return first non-loopback IPv4 address
-			if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
+			// Return first non-loopback IPv4 address (skip Tailscale CGNAT range)
+			if ip != nil && !ip.IsLoopback() && ip.To4() != nil && !IsTailscaleIP(ip) {
 				return ip.String()
 			}
 		}
 	}
 
 	return ""
+}
+
+// GetTailscaleIP returns the Tailscale IP address (100.64.0.0/10 CGNAT range).
+// Returns empty string if no Tailscale interface is found.
+func GetTailscaleIP() string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+
+	for _, iface := range interfaces {
+		// Skip down interfaces and loopback
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			if ip != nil && ip.To4() != nil && IsTailscaleIP(ip) {
+				return ip.String()
+			}
+		}
+	}
+
+	return ""
+}
+
+// IsTailscaleIP checks if an IP is in the Tailscale CGNAT range (100.64.0.0/10).
+func IsTailscaleIP(ip net.IP) bool {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	// 100.64.0.0/10 means first octet is 100, second octet is 64-127
+	return ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127
 }

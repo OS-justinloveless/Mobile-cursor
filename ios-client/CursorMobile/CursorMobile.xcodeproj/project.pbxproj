@@ -70,6 +70,7 @@
 		F000000000000040 /* CacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000040 /* CacheManager.swift */; };
 		F000000000000041 /* ThemeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000041 /* ThemeManager.swift */; };
 		F000000000000043 /* SavedHostsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000043 /* SavedHostsManager.swift */; };
+		1D87AEB747B4438F /* TailscaleManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54F3D5A433AA4999 /* TailscaleManager.swift */; };
 		F000000000000050 /* Suggestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000050 /* Suggestion.swift */; };
 		F000000000000051 /* SuggestionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000051 /* SuggestionOverlay.swift */; };
 		F000000000000070 /* LogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F100000000000070 /* LogManager.swift */; };
@@ -163,6 +164,7 @@
 		F100000000000040 /* CacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheManager.swift; sourceTree = "<group>"; };
 		F100000000000041 /* ThemeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeManager.swift; sourceTree = "<group>"; };
 		F100000000000043 /* SavedHostsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedHostsManager.swift; sourceTree = "<group>"; };
+		54F3D5A433AA4999 /* TailscaleManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscaleManager.swift; sourceTree = "<group>"; };
 		F100000000000050 /* Suggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Suggestion.swift; sourceTree = "<group>"; };
 		F100000000000051 /* SuggestionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuggestionOverlay.swift; sourceTree = "<group>"; };
 		F100000000000070 /* LogManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogManager.swift; sourceTree = "<group>"; };
@@ -293,6 +295,7 @@
 				F100000000000040 /* CacheManager.swift */,
 				F100000000000041 /* ThemeManager.swift */,
 				F100000000000043 /* SavedHostsManager.swift */,
+				54F3D5A433AA4999 /* TailscaleManager.swift */,
 				C100000000000001 /* SyntaxHighlightManager.swift */,
 				F100000000000070 /* LogManager.swift */,
 				H100000000000002 /* ChatManager.swift */,
@@ -516,6 +519,7 @@
 				F000000000000040 /* CacheManager.swift in Sources */,
 				F000000000000041 /* ThemeManager.swift in Sources */,
 				F000000000000043 /* SavedHostsManager.swift in Sources */,
+				1D87AEB747B4438F /* TailscaleManager.swift in Sources */,
 				F000000000000070 /* LogManager.swift in Sources */,
 				F000000000000010 /* APIService.swift in Sources */,
 				F000000000000011 /* WebSocketManager.swift in Sources */,

@@ -74,7 +74,9 @@ class APIService {
         queryItems: [URLQueryItem]? = nil
     ) async throws -> Data {
         var components = URLComponents(string: "\(serverUrl)\(endpoint)")
-        components?.queryItems = queryItems
+        if let queryItems = queryItems {
+            components?.queryItems = queryItems
+        }
         
         guard let url = components?.url else {
             throw APIError.invalidURL
@@ -151,6 +153,17 @@ class APIService {
         do {
             let response = try decoder.decode(ModelsResponse.self, from: data)
             return response.models
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+    
+    /// Get Tailscale status from the server
+    /// Returns info about the server's Tailscale connection, IP, hostname, and peers
+    func getTailscaleStatus() async throws -> TailscaleStatusResponse {
+        let data = try await makeRequest(endpoint: "/api/system/tailscale")
+        do {
+            return try decoder.decode(TailscaleStatusResponse.self, from: data)
         } catch {
             throw APIError.decodingError(error)
         }
@@ -597,12 +610,13 @@ class APIService {
     /// - Parameter projectPath: Optional project path to filter chats
     /// - Returns: Array of ChatWindow objects
     func getChats(projectPath: String? = nil) async throws -> [ChatWindow] {
-        var endpoint = "/api/conversations"
+        let endpoint = "/api/conversations"
+        var queryItems: [URLQueryItem]? = nil
         if let projectPath = projectPath {
-            endpoint += "?projectPath=\(projectPath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? projectPath)"
+            queryItems = [URLQueryItem(name: "projectPath", value: projectPath)]
         }
         
-        let data = try await makeRequest(endpoint: endpoint)
+        let data = try await makeRequest(endpoint: endpoint, queryItems: queryItems)
         
         do {
             let response = try decoder.decode(ChatsResponse.self, from: data)

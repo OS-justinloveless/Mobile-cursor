@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
 import { checkAllToolsAvailability } from '../utils/CLIAdapter.js';
+import { tailscaleManager } from '../utils/TailscaleManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -824,6 +825,56 @@ router.post('/restart', async (req, res) => {
       error: 'Failed to initiate server restart',
       message: error.message
     });
+  }
+});
+
+// Get Tailscale status and connection info
+router.get('/tailscale', async (req, res) => {
+  try {
+    const isAvailable = await tailscaleManager.isAvailable();
+    
+    if (!isAvailable) {
+      return res.json({
+        available: false,
+        connected: false,
+        message: 'Tailscale CLI not found. Install Tailscale to enable this feature.'
+      });
+    }
+
+    const status = await tailscaleManager.getStatus();
+    
+    if (!status || !status.connected) {
+      return res.json({
+        available: true,
+        connected: false,
+        message: 'Tailscale is installed but not connected. Run "tailscale up" to connect.'
+      });
+    }
+
+    const port = process.env.PORT || 3847;
+    const connectionUrl = `http://${status.ip}:${port}`;
+    const magicDNSUrl = status.magicDNSHostname
+      ? `http://${status.magicDNSHostname}:${port}`
+      : null;
+
+    res.json({
+      available: true,
+      connected: true,
+      ip: status.ip,
+      ipv6: status.ipv6,
+      hostname: status.hostname,
+      magicDNSHostname: status.magicDNSHostname,
+      tailnetName: status.tailnetName,
+      connectionUrl,
+      magicDNSUrl,
+      port: parseInt(port),
+      peers: status.peers,
+      backendState: status.backendState,
+      magicDNSEnabled: status.magicDNSEnabled,
+    });
+  } catch (error) {
+    console.error('[System] Error fetching Tailscale status:', error);
+    res.status(500).json({ error: 'Failed to fetch Tailscale status' });
   }
 });
 

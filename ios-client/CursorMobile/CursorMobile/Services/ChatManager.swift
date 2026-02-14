@@ -105,6 +105,11 @@ class ChatManager: ObservableObject {
         isLoadingChats = true
         error = nil
 
+        // Clear stale chats from a different project immediately
+        if let first = chats.first, first.projectPath != projectPath {
+            chats = []
+        }
+
         do {
             self.chats = try await api.getChats(projectPath: projectPath)
         } catch {

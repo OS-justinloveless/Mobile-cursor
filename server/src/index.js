@@ -14,6 +14,7 @@ import { setupWebSocket } from "./websocket/index.js";
 import { AuthManager } from "./auth/AuthManager.js";
 import { LogManager } from "./utils/LogManager.js";
 import { chatProcessManager } from "./utils/ChatProcessManager.js";
+import { tailscaleManager } from "./utils/TailscaleManager.js";
 
 config();
 
@@ -159,6 +160,21 @@ setupRoutes(app);
 // Setup WebSocket
 setupWebSocket(wss, authManager);
 
+// Tailscale discovery endpoint (no auth required)
+// iOS clients probe this on Tailscale peer IPs to find Napp Trapp servers
+app.get("/discover", async (req, res) => {
+  try {
+    res.json({
+      service: "napp-trapp",
+      version: "1.0.0",
+      hostname: os.hostname(),
+      port: parseInt(PORT),
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Discovery failed" });
+  }
+});
+
 // QR Code endpoint (no auth required - used for initial connection)
 app.get("/qr", async (req, res) => {
   try {
@@ -171,12 +187,29 @@ app.get("/qr", async (req, res) => {
         light: "#ffffff",
       },
     });
+
+    // Include Tailscale info if available
+    let tailscale = null;
+    try {
+      const tsStatus = await tailscaleManager.getStatus();
+      if (tsStatus && tsStatus.connected && tsStatus.ip) {
+        tailscale = {
+          ip: tsStatus.ip,
+          hostname: tsStatus.magicDNSHostname,
+          url: `http://${tsStatus.ip}:${PORT}`,
+        };
+      }
+    } catch {
+      // Tailscale not available, that's fine
+    }
+
     res.json({
       qr: qrDataUrl,
       connectionUrl,
       url: `http://${LOCAL_IP}:${PORT}`,
       ip: LOCAL_IP,
       port: PORT,
+      tailscale,
     });
   } catch (error) {
     res.status(500).json({ error: "Failed to generate QR code" });
@@ -269,6 +302,39 @@ async function displayStartupMessage() {
   console.log(
     "╚═══════════════════════════════════════════════════════════════════╝",
   );
+
+  // Check for Tailscale and display info if available
+  try {
+    const tsStatus = await tailscaleManager.getStatus();
+    if (tsStatus && tsStatus.connected && tsStatus.ip) {
+      console.log(
+        "╔═══════════════════════════════════════════════════════════════════╗",
+      );
+      console.log(
+        "║   Tailscale Connected                                             ║",
+      );
+      console.log(
+        "╠═══════════════════════════════════════════════════════════════════╣",
+      );
+      console.log(`║   Tailscale IP:  ${tsStatus.ip}`.padEnd(68) + "║");
+      if (tsStatus.magicDNSHostname) {
+        console.log(`║   MagicDNS:     ${tsStatus.magicDNSHostname}`.padEnd(68) + "║");
+      }
+      console.log(`║   Tailscale URL: http://${tsStatus.ip}:${PORT}`.padEnd(68) + "║");
+      console.log(
+        "║                                                                    ║",
+      );
+      console.log(
+        "║   iOS devices on your tailnet will auto-discover this server.      ║",
+      );
+      console.log(
+        "╚═══════════════════════════════════════════════════════════════════╝",
+      );
+    }
+  } catch {
+    // Tailscale not available, that's fine - just skip
+  }
+
   console.log("\n");
 }
 

@@ -98,6 +98,10 @@ struct SettingsView: View {
     @State private var restartError: String?
     @State private var showRestartConfirmation = false
     
+    // Tailscale states
+    @State private var tailscaleStatus: TailscaleStatusResponse?
+    @State private var loadingTailscale = false
+    
     var body: some View {
         List {
             // Connection Status Section
@@ -259,6 +263,65 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Network Interfaces")
+                }
+            }
+            
+            // Tailscale Section
+            if let tsStatus = tailscaleStatus, tsStatus.available {
+                Section {
+                    HStack {
+                        Label("Status", systemImage: tsStatus.connected ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        Spacer()
+                        Text(tsStatus.connected ? "Connected" : "Not Connected")
+                            .font(.caption)
+                            .foregroundColor(tsStatus.connected ? .green : .secondary)
+                    }
+                    
+                    if let ip = tsStatus.ip {
+                        HStack {
+                            Label("Tailscale IP", systemImage: "network")
+                            Spacer()
+                            Text(ip)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let hostname = tsStatus.magicDNSHostname, !hostname.isEmpty {
+                        HStack {
+                            Label("MagicDNS", systemImage: "globe")
+                            Spacer()
+                            Text(hostname)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    
+                    if let url = tsStatus.connectionUrl {
+                        HStack {
+                            Label("Tailscale URL", systemImage: "link")
+                            Spacer()
+                            Text(url)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if let peers = tsStatus.peers {
+                        HStack {
+                            Label("Tailnet Peers", systemImage: "person.2")
+                            Spacer()
+                            Text("\(peers.filter { $0.online }.count) online")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Tailscale")
+                } footer: {
+                    Text("Tailscale lets iOS devices on your tailnet automatically discover this server.")
                 }
             }
             
@@ -896,6 +959,14 @@ struct SettingsView: View {
                 cursorStatus = try await cursor
             } catch {
                 self.error = error.localizedDescription
+            }
+            
+            // Load Tailscale status (separate try so it doesn't block other data)
+            do {
+                tailscaleStatus = try await api.getTailscaleStatus()
+            } catch {
+                // Tailscale not available, that's fine
+                print("[Settings] Tailscale status fetch failed: \(error.localizedDescription)")
             }
             
             isLoading = false

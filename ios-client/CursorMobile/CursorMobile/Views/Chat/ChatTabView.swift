@@ -64,16 +64,15 @@ struct ChatTabView: View {
                 apiService: authManager.createAPIService(),
                 webSocketManager: webSocketManager
             )
+        }
+        .task(id: project.id) {
+            // Re-fetch chats whenever the project changes (or on first appear)
+            await chatManager.fetchAgents()
+            await chatManager.fetchModels()
+            await chatManager.fetchChats(projectPath: project.path)
 
-            // Fetch initial data
-            Task {
-                await chatManager.fetchAgents()
-                await chatManager.fetchModels()
-                await chatManager.fetchChats(projectPath: project.path)
-
-                // After chats are loaded, check if we have a pending deep link to navigate to
-                navigateToPendingConversation()
-            }
+            // After chats are loaded, check if we have a pending deep link to navigate to
+            navigateToPendingConversation()
         }
         .onChange(of: pendingConversationId) { _, newId in
             // If a new pending conversation comes in while we're already visible, navigate immediately

@@ -6,6 +6,7 @@ import AVFoundation
 struct LoginView: View {
     @EnvironmentObject var authManager: AuthManager
     @StateObject private var savedHostsManager = SavedHostsManager.shared
+    @StateObject private var tailscaleManager = TailscaleManager.shared
     @State private var serverUrl = ""
     @State private var token = ""
     @State private var isConnecting = false
@@ -14,6 +15,7 @@ struct LoginView: View {
     #endif
     @State private var connectingHostId: UUID? = nil
     @State private var showSetupGuide = false
+    @State private var connectingTailscaleServerId: UUID? = nil
     
     var body: some View {
         NavigationView {
@@ -118,6 +120,33 @@ struct LoginView: View {
                             }
                         }
                         .padding(.horizontal)
+                        
+                        // Divider
+                        HStack {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.3))
+                                .frame(height: 1)
+                            
+                            Text("OR")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.3))
+                                .frame(height: 1)
+                        }
+                        .padding(.horizontal)
+                    }
+                    
+                    // Tailscale Discovery Section
+                    if tailscaleManager.isTailscaleActive {
+                        TailscaleDiscoverySection(
+                            tailscaleManager: tailscaleManager,
+                            connectingServerId: $connectingTailscaleServerId,
+                            onConnect: { server in
+                                connectToTailscaleServer(server)
+                            }
+                        )
                         
                         // Divider
                         HStack {
@@ -337,6 +366,261 @@ struct LoginView: View {
             await authManager.login(serverUrl: host.serverUrl, token: host.token)
             connectingHostId = nil
         }
+    }
+    
+    private func connectToTailscaleServer(_ server: TailscaleServer) {
+        // Check if we have a saved host with matching Tailscale IP
+        let savedHost = savedHostsManager.savedHosts.first { host in
+            if let url = URL(string: host.serverUrl), let hostStr = url.host {
+                return hostStr == server.ip
+            }
+            return false
+        }
+        
+        if let savedHost = savedHost {
+            // Auto-connect using saved credentials
+            connectingTailscaleServerId = server.id
+            Task {
+                await authManager.login(serverUrl: savedHost.serverUrl, token: savedHost.token)
+                connectingTailscaleServerId = nil
+            }
+        } else {
+            // Pre-fill the server URL, user still needs to provide token
+            serverUrl = server.serverUrl
+        }
+    }
+}
+
+// MARK: - Tailscale Discovery Section
+
+struct TailscaleDiscoverySection: View {
+    @ObservedObject var tailscaleManager: TailscaleManager
+    @Binding var connectingServerId: UUID?
+    let onConnect: (TailscaleServer) -> Void
+    
+    @State private var manualIP = ""
+    @State private var isProbing = false
+    @State private var probeError: String?
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: "network")
+                    .font(.title3)
+                    .foregroundColor(.blue)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tailscale Network")
+                        .font(.headline)
+                    
+                    if let ip = tailscaleManager.tailscaleIP {
+                        Text("Connected as \(ip)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                // Scan/Refresh button
+                Button {
+                    Task {
+                        await tailscaleManager.discoverServers()
+                    }
+                } label: {
+                    if tailscaleManager.isScanning {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                }
+                .disabled(tailscaleManager.isScanning)
+            }
+            
+            // Discovered servers
+            if tailscaleManager.isScanning {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Scanning Tailscale network...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else if !tailscaleManager.discoveredServers.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(tailscaleManager.discoveredServers) { server in
+                        TailscaleServerRow(
+                            server: server,
+                            isConnecting: connectingServerId == server.id,
+                            hasSavedToken: hasSavedToken(for: server),
+                            onConnect: {
+                                onConnect(server)
+                            }
+                        )
+                    }
+                }
+            }
+            
+            // Manual IP entry - always shown so users can enter a specific IP
+            if !tailscaleManager.isScanning {
+                VStack(spacing: 8) {
+                    if tailscaleManager.discoveredServers.isEmpty {
+                        Text("No servers found automatically")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack(spacing: 8) {
+                        TextField("Server's Tailscale IP", text: $manualIP)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .keyboardType(.decimalPad)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                            .font(.callout)
+                        
+                        Button {
+                            probeManualIP()
+                        } label: {
+                            if isProbing {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 60)
+                            } else {
+                                Text("Find")
+                                    .font(.callout)
+                                    .fontWeight(.medium)
+                                    .frame(width: 60)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                        .disabled(manualIP.trimmingCharacters(in: .whitespaces).isEmpty || isProbing)
+                    }
+                    
+                    if let error = probeError {
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundColor(.red)
+                    }
+                    
+                    Text("Enter the Tailscale IP shown in your server's terminal")
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.8))
+                }
+            }
+        }
+        .padding()
+        .background(Color.blue.opacity(0.05))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+        )
+        .padding(.horizontal)
+        .onAppear {
+            tailscaleManager.loadPersistedPeers()
+            Task {
+                await tailscaleManager.discoverServers()
+            }
+        }
+    }
+    
+    private func probeManualIP() {
+        let ip = manualIP.trimmingCharacters(in: .whitespaces)
+        guard !ip.isEmpty else { return }
+        
+        isProbing = true
+        probeError = nil
+        
+        Task {
+            let server = await tailscaleManager.probeSpecificIP(ip)
+            await MainActor.run {
+                isProbing = false
+                if let server = server {
+                    onConnect(server)
+                } else {
+                    probeError = "No Napp Trapp server found at \(ip):3847"
+                }
+            }
+        }
+    }
+    
+    private func hasSavedToken(for server: TailscaleServer) -> Bool {
+        SavedHostsManager.shared.savedHosts.contains { host in
+            if let url = URL(string: host.serverUrl), let hostStr = url.host {
+                return hostStr == server.ip
+            }
+            return false
+        }
+    }
+}
+
+// MARK: - Tailscale Server Row
+
+struct TailscaleServerRow: View {
+    let server: TailscaleServer
+    let isConnecting: Bool
+    let hasSavedToken: Bool
+    let onConnect: () -> Void
+    
+    var body: some View {
+        Button(action: onConnect) {
+            HStack(spacing: 12) {
+                // Server icon
+                Image(systemName: "desktopcomputer")
+                    .font(.title2)
+                    .foregroundColor(.blue)
+                    .frame(width: 40, height: 40)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(8)
+                
+                // Server info
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(server.hostname)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Text(server.ip)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    if hasSavedToken {
+                        Text("Tap to connect")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    } else {
+                        Text("Token required")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                }
+                
+                Spacer()
+                
+                // Status indicator
+                if isConnecting {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle())
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "network")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(12)
+        }
+        .disabled(isConnecting)
     }
 }
 
